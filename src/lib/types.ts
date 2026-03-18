@@ -7,11 +7,11 @@ export interface PortfolioPosition {
   shares: number;
   purchaseDate: string;
   purchasePrice: number;
-  dividendAmount: number; // Per share
+  dividendAmount: number; // Per share (Base Baseline)
   frequency: DividendFrequency;
   nextExDate: string; // YYYY-MM-DD (Base Anchor)
   isManualDate?: boolean;
-  manualAdjustments?: Record<number, string>; // Maps iteration index to a manually set date
+  manualAdjustments?: Record<number, { date?: string; amount?: number }>; // Maps iteration index to manual overrides
 }
 
 export interface DividendData {

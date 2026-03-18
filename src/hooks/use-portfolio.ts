@@ -11,8 +11,8 @@ export function usePortfolio() {
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    const savedPositions = localStorage.getItem('dw_positions_v4');
-    const savedTransactions = localStorage.getItem('dw_transactions_v4');
+    const savedPositions = localStorage.getItem('dw_positions_v5');
+    const savedTransactions = localStorage.getItem('dw_transactions_v5');
     
     if (savedPositions && savedTransactions) {
       setPositions(JSON.parse(savedPositions));
@@ -27,8 +27,8 @@ export function usePortfolio() {
 
   useEffect(() => {
     if (isLoaded) {
-      localStorage.setItem('dw_positions_v4', JSON.stringify(positions));
-      localStorage.setItem('dw_transactions_v4', JSON.stringify(transactions));
+      localStorage.setItem('dw_positions_v5', JSON.stringify(positions));
+      localStorage.setItem('dw_transactions_v5', JSON.stringify(transactions));
     }
   }, [positions, transactions, isLoaded]);
 
@@ -54,22 +54,24 @@ export function usePortfolio() {
   const updatePosition = useCallback((id: string, updatedFields: Partial<PortfolioPosition>) => {
     setPositions(prev => prev.map(p => {
       if (p.id === id) {
-        // If nextExDate is updated (usually from Portfolio page), clear all manual overrides
-        const nextAdjustments = updatedFields.nextExDate ? {} : p.manualAdjustments;
+        // If nextExDate or dividendAmount is updated from Portfolio page, clear all individual calendar overrides
+        const shouldReset = updatedFields.nextExDate !== undefined || updatedFields.dividendAmount !== undefined;
+        const nextAdjustments = shouldReset ? {} : p.manualAdjustments;
         return { ...p, ...updatedFields, manualAdjustments: nextAdjustments };
       }
       return p;
     }));
   }, []);
 
-  const updateManualAdjustment = useCallback((posId: string, index: number, newDate: string) => {
+  const updateManualAdjustment = useCallback((posId: string, index: number, updates: { date?: string; amount?: number }) => {
     setPositions(prev => prev.map(p => {
       if (p.id === posId) {
+        const current = p.manualAdjustments?.[index] || {};
         return {
           ...p,
           manualAdjustments: {
             ...(p.manualAdjustments || {}),
-            [index]: newDate
+            [index]: { ...current, ...updates }
           }
         };
       }
@@ -104,6 +106,8 @@ export function usePortfolio() {
     
     positions.forEach(pos => {
       const baseDate = new Date(pos.nextExDate);
+      const baseAmount = pos.dividendAmount;
+      
       let iterations = 0;
       let monthsStep = 0;
       let daysStep = 0;
@@ -114,21 +118,39 @@ export function usePortfolio() {
       else if (pos.frequency === 'semi-monthly') { iterations = 24; daysStep = 15; }
 
       let currentAnchorDate = baseDate;
+      let currentAmount = baseAmount;
       let lastAnchorIndex = 0;
 
       for (let i = 0; i < iterations; i++) {
         let exDate: Date;
+        let amountPerShare: number;
         let status: 'base' | 'edited' | 'projected' = 'projected';
 
-        // 1. Check if this specific occurrence is manually edited
-        if (pos.manualAdjustments?.[i]) {
-          exDate = new Date(pos.manualAdjustments[i]);
+        const adjustment = pos.manualAdjustments?.[i];
+
+        // 1. Handle overrides and shifts
+        if (adjustment) {
+          if (adjustment.date) {
+            exDate = new Date(adjustment.date);
+            currentAnchorDate = exDate;
+          } else {
+            const diff = i - lastAnchorIndex;
+            exDate = pos.frequency === 'semi-monthly' 
+              ? addDays(currentAnchorDate, diff * daysStep)
+              : addMonths(currentAnchorDate, diff * monthsStep);
+          }
+
+          if (adjustment.amount !== undefined) {
+            amountPerShare = adjustment.amount;
+            currentAmount = amountPerShare;
+          } else {
+            amountPerShare = currentAmount;
+          }
+
           status = 'edited';
-          // Move the anchor for all future projections in this loop
-          currentAnchorDate = exDate;
           lastAnchorIndex = i;
         } 
-        // 2. Otherwise, calculate relative to the last anchor (either the base or a previous edit)
+        // 2. Standard projections relative to last anchor
         else {
           const diff = i - lastAnchorIndex;
           if (pos.frequency === 'semi-monthly') {
@@ -136,6 +158,8 @@ export function usePortfolio() {
           } else {
             exDate = addMonths(currentAnchorDate, diff * monthsStep);
           }
+          
+          amountPerShare = currentAmount;
           
           if (i === 0) status = 'base';
           else status = 'projected';
@@ -148,8 +172,8 @@ export function usePortfolio() {
           exDate: format(exDate, 'yyyy-MM-dd'),
           recordDate: format(exDate, 'yyyy-MM-dd'),
           payoutDate: format(payoutDate, 'yyyy-MM-dd'),
-          amountPerShare: pos.dividendAmount,
-          totalAmount: pos.shares * pos.dividendAmount,
+          amountPerShare: amountPerShare,
+          totalAmount: pos.shares * amountPerShare,
           sharesAtTime: pos.shares,
           index: i,
           status: status

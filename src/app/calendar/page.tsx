@@ -18,7 +18,10 @@ export default function DividendCalendar() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [editingDividend, setEditingDividend] = useState<any>(null);
-  const [newDate, setNewDate] = useState("");
+  const [editFields, setEditFields] = useState({
+    date: "",
+    amount: 0
+  });
 
   const allDivs = useMemo(() => getAllDividends(), [getAllDividends]);
 
@@ -32,15 +35,17 @@ export default function DividendCalendar() {
     );
   };
 
-  const handleUpdateDate = () => {
-    if (!editingDividend || !newDate) return;
+  const handleUpdate = () => {
+    if (!editingDividend) return;
     
     const pos = positions.find(p => p.ticker === editingDividend.ticker);
     if (pos) {
-      updateManualAdjustment(pos.id, editingDividend.index, newDate);
+      updateManualAdjustment(pos.id, editingDividend.index, {
+        date: editFields.date,
+        amount: Number(editFields.amount)
+      });
     }
     setEditingDividend(null);
-    setNewDate("");
   };
 
   if (!isLoaded) return <div className="p-8">Loading...</div>;
@@ -156,7 +161,10 @@ export default function DividendCalendar() {
                               className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
                               onClick={() => {
                                 setEditingDividend(ev);
-                                setNewDate(ev.exDate);
+                                setEditFields({
+                                  date: ev.exDate,
+                                  amount: ev.amountPerShare
+                                });
                               }}
                             >
                               <Edit3 className="h-3.5 w-3.5" />
@@ -192,20 +200,24 @@ export default function DividendCalendar() {
       <Dialog open={!!editingDividend} onOpenChange={() => setEditingDividend(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Adjust Event Date</DialogTitle>
+            <DialogTitle>Adjust Event Details</DialogTitle>
             <DialogDescription>
-              Changing this will shift all future projected dates for {editingDividend?.ticker}. Past dates will remain.
+              Changes will shift all future projected dates and amounts for {editingDividend?.ticker}.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Actual Ex-Dividend Date</Label>
-              <Input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} />
+              <Input type="date" value={editFields.date} onChange={e => setEditFields(prev => ({ ...prev, date: e.target.value }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Dividend Amount (Per Share)</Label>
+              <Input type="number" step="0.001" value={editFields.amount} onChange={e => setEditFields(prev => ({ ...prev, amount: Number(e.target.value) }))} />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingDividend(null)}>Cancel</Button>
-            <Button onClick={handleUpdateDate}>Update & Shift Projections</Button>
+            <Button onClick={handleUpdate}>Update & Shift Projections</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
