@@ -3,38 +3,31 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { PortfolioPosition, TransactionRecord, DividendData, DividendFrequency } from '@/lib/types';
 import { format, addMonths, addDays, isBefore, parseISO, startOfDay } from 'date-fns';
-import { db } from '@/lib/firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, query, orderBy } from 'firebase/firestore';
+
+const STORAGE_KEY_TX = 'dividendwise_transactions';
+const STORAGE_KEY_ADJ = 'dividendwise_adjustments';
 
 export function usePortfolio() {
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
   const [manualAdjustments, setManualAdjustments] = useState<Record<string, Record<number, { date?: string; amount?: number }>>>({});
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Subscribe to Firestore for real-time server-side persistence
+  // Load from LocalStorage on mount
   useEffect(() => {
-    // 1. Listen for Transactions
-    const qTransactions = query(collection(db, 'transactions'), orderBy('date', 'asc'));
-    const unsubscribeTx = onSnapshot(qTransactions, (snapshot) => {
-      const txData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as TransactionRecord));
-      setTransactions(txData);
-      setIsLoaded(true);
-    });
-
-    // 2. Listen for Adjustments
-    const unsubscribeAdj = onSnapshot(collection(db, 'adjustments'), (snapshot) => {
-      const adjData: Record<string, any> = {};
-      snapshot.docs.forEach(doc => {
-        adjData[doc.id] = doc.data().adjustments || {};
-      });
-      setManualAdjustments(adjData);
-    });
-
-    return () => {
-      unsubscribeTx();
-      unsubscribeAdj();
-    };
+    const savedTx = localStorage.getItem(STORAGE_KEY_TX);
+    const savedAdj = localStorage.getItem(STORAGE_KEY_ADJ);
+    if (savedTx) setTransactions(JSON.parse(savedTx));
+    if (savedAdj) setManualAdjustments(JSON.parse(savedAdj));
+    setIsLoaded(true);
   }, []);
+
+  // Save to LocalStorage whenever data changes
+  useEffect(() => {
+    if (isLoaded) {
+      localStorage.setItem(STORAGE_KEY_TX, JSON.stringify(transactions));
+      localStorage.setItem(STORAGE_KEY_ADJ, JSON.stringify(manualAdjustments));
+    }
+  }, [transactions, manualAdjustments, isLoaded]);
 
   const positions = useMemo(() => {
     const posMap: Record<string, { 
@@ -68,6 +61,7 @@ export function usePortfolio() {
       if (tx.type === 'buy') {
         p.shares += txShares;
         p.totalCost += txAmount;
+        // Update dividend info from the latest buy
         if (tx.dividendAmount !== undefined) p.dividendAmount = Number(tx.dividendAmount) || 0;
         if (tx.frequency !== undefined) p.frequency = tx.frequency;
         if (tx.nextExDate !== undefined) p.nextExDate = tx.nextExDate;
@@ -76,6 +70,7 @@ export function usePortfolio() {
         p.shares -= txShares;
         p.totalCost -= (txShares * avgCost);
       } else if (tx.type === 'dividend') {
+        // Optional update of dividend info from payout logs
         if (tx.dividendAmount !== undefined) p.dividendAmount = Number(tx.dividendAmount) || 0;
       }
     });
@@ -95,66 +90,51 @@ export function usePortfolio() {
       })) as PortfolioPosition[];
   }, [transactions, manualAdjustments]);
 
-  const addTransaction = useCallback(async (tx: Omit<TransactionRecord, 'id'>) => {
+  const addTransaction = useCallback((tx: Omit<TransactionRecord, 'id'>) => {
     const uniqueId = `t_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const ticker = tx.ticker.toUpperCase();
     
+    setTransactions(prev => {
+      const newTx = { ...tx, id: uniqueId, ticker };
+      return [...prev, newTx];
+    });
+
     // If it's a new buy, we reset specific calendar adjustments for this stock to start fresh
     if (tx.type === 'buy') {
-      await deleteDoc(doc(db, 'adjustments', ticker));
+      setManualAdjustments(prev => {
+        const next = { ...prev };
+        delete next[ticker];
+        return next;
+      });
     }
+  }, []);
 
-    await setDoc(doc(db, 'transactions', uniqueId), {
-      ...tx,
-      ticker,
-      shares: Number(tx.shares) || 0,
-      price: Number(tx.price) || 0,
-      totalAmount: Number(tx.totalAmount) || 0,
-      dividendAmount: tx.dividendAmount !== undefined ? Number(tx.dividendAmount) || 0 : undefined
+  const deleteTransaction = useCallback((id: string) => {
+    setTransactions(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  const updateManualAdjustment = useCallback((ticker: string, index: number, updates: { date?: string; amount?: number }) => {
+    setManualAdjustments(prev => {
+      const stockAdjs = prev[ticker] || {};
+      return {
+        ...prev,
+        [ticker]: {
+          ...stockAdjs,
+          [index]: { ...stockAdjs[index], ...updates }
+        }
+      };
     });
   }, []);
 
-  const deleteTransaction = useCallback(async (id: string) => {
-    await deleteDoc(doc(db, 'transactions', id));
-  }, []);
-
-  const updateManualAdjustment = useCallback(async (ticker: string, index: number, updates: { date?: string; amount?: number }) => {
-    const currentAdjustments = manualAdjustments[ticker] || {};
-    const updated = {
-      ...currentAdjustments,
-      [index]: { ...(currentAdjustments[index] || {}), ...updates }
-    };
-    
-    await setDoc(doc(db, 'adjustments', ticker), { adjustments: updated });
-  }, [manualAdjustments]);
-
-  const importData = useCallback(async (data: { transactions: TransactionRecord[], manualAdjustments?: any }) => {
-    const batch = writeBatch(db);
-
-    if (data.transactions) {
-      data.transactions.forEach(tx => {
-        const id = tx.id || `t_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        batch.set(doc(db, 'transactions', id), {
-          ...tx,
-          shares: Number(tx.shares) || 0,
-          price: Number(tx.price) || 0,
-          totalAmount: Number(tx.totalAmount) || 0
-        });
-      });
-    }
-
-    if (data.manualAdjustments) {
-      Object.entries(data.manualAdjustments).forEach(([ticker, adjs]) => {
-        batch.set(doc(db, 'adjustments', ticker), { adjustments: adjs });
-      });
-    }
-
-    await batch.commit();
+  const importData = useCallback((data: { transactions: TransactionRecord[], manualAdjustments?: any }) => {
+    if (data.transactions) setTransactions(data.transactions);
+    if (data.manualAdjustments) setManualAdjustments(data.manualAdjustments);
   }, []);
 
   const getAllDividends = useCallback(() => {
     const allDivs: DividendData[] = [];
     
+    // 1. Add historical actual dividend payouts from transactions
     transactions.forEach(tx => {
       if (tx.type === 'dividend') {
         const exDateStr = tx.nextExDate || tx.date;
@@ -172,6 +152,7 @@ export function usePortfolio() {
       }
     });
 
+    // 2. Project future dividends based on current positions
     positions.forEach(pos => {
       const baseDate = parseISO(pos.nextExDate);
       const baseAmount = pos.dividendAmount;
@@ -228,6 +209,7 @@ export function usePortfolio() {
         const payoutDate = addDays(exDate, 10);
         const exDateStr = format(exDate, 'yyyy-MM-dd');
 
+        // Logic: Only shares owned BEFORE ex-dividend date qualify
         const sharesAtDate = transactions
           .filter(tx => tx.ticker === pos.ticker && isBefore(parseISO(tx.date), startOfDay(parseISO(exDateStr))))
           .reduce((sum, tx) => {
@@ -253,6 +235,7 @@ export function usePortfolio() {
       }
     });
 
+    // Sort by Ex-Date and remove duplicates if any (ticker+date collision)
     const seen = new Set();
     return allDivs.filter(div => {
       const key = `${div.ticker}-${div.exDate}`;

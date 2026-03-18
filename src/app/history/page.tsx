@@ -1,4 +1,3 @@
-
 "use client"
 
 import { useState, useRef } from 'react';
@@ -62,6 +61,7 @@ export default function HistoryPage() {
     });
     
     setIsAddOpen(false);
+    // Reset form
     setFormData({
       ticker: "",
       type: "buy",
@@ -138,6 +138,7 @@ export default function HistoryPage() {
       }
     };
     reader.readAsText(file);
+    // Reset file input
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 

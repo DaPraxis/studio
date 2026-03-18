@@ -1,4 +1,3 @@
-
 "use client"
 
 import { usePortfolio } from "@/hooks/use-portfolio";
@@ -26,14 +25,15 @@ export default function Dashboard() {
   const allDivs = getAllDividends();
   const now = new Date();
   
+  // Future payouts based on payout date
   const upcomingDivs = allDivs.filter(d => isAfter(new Date(d.payoutDate), now));
   const totalUpcomingPayout = upcomingDivs.reduce((acc, d) => acc + (Number(d.totalAmount) || 0), 0);
   
+  // Total principle currently deployed
   const totalPortfolioCost = positions.reduce((acc, p) => acc + (Number(p.totalCost) || 0), 0);
   
+  // Annualized dividend income from projected window (approx 1 year)
   const annualIncome = allDivs.reduce((acc, d) => {
-    // Only include projected/future or recent annual cycle divs, 
-    // but the simple sum of the 12-month projection window works best here
     return acc + (Number(d.totalAmount) || 0);
   }, 0);
 
