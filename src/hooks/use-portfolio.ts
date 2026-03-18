@@ -3,14 +3,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { PortfolioPosition, TransactionRecord, DividendData } from '@/lib/types';
 import { INITIAL_POSITIONS, INITIAL_TRANSACTIONS } from '@/lib/mock-data';
-import { format, addMonths, isAfter, isBefore, addDays } from 'date-fns';
+import { format, addMonths, addDays } from 'date-fns';
 
 export function usePortfolio() {
   const [positions, setPositions] = useState<PortfolioPosition[]>([]);
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Initial Load from LocalStorage
   useEffect(() => {
     const savedPositions = localStorage.getItem('dw_positions_v2');
     const savedTransactions = localStorage.getItem('dw_transactions_v2');
@@ -26,7 +25,6 @@ export function usePortfolio() {
     setIsLoaded(true);
   }, []);
 
-  // Sync Positions/Transactions to LocalStorage
   useEffect(() => {
     if (isLoaded) {
       localStorage.setItem('dw_positions_v2', JSON.stringify(positions));
@@ -75,21 +73,37 @@ export function usePortfolio() {
     setTransactions(prev => [transaction, ...prev]);
   }, [positions]);
 
-  /**
-   * Projects future dividends based on manual input.
-   * Generates a 12-month schedule starting from nextExDate.
-   */
   const getAllDividends = useCallback(() => {
     const allDivs: Array<DividendData & { totalAmount: number; sharesAtTime: number }> = [];
     
     positions.forEach(pos => {
       const startDate = new Date(pos.nextExDate);
-      let iterations = pos.frequency === 'monthly' ? 12 : pos.frequency === 'quarterly' ? 4 : 1;
-      let monthsToAdd = pos.frequency === 'monthly' ? 1 : pos.frequency === 'quarterly' ? 3 : 12;
+      let iterations = 0;
+      let monthsToAdd = 0;
+      let daysToAdd = 0;
+
+      if (pos.frequency === 'monthly') {
+        iterations = 12;
+        monthsToAdd = 1;
+      } else if (pos.frequency === 'quarterly') {
+        iterations = 4;
+        monthsToAdd = 3;
+      } else if (pos.frequency === 'annually') {
+        iterations = 1;
+        monthsToAdd = 12;
+      } else if (pos.frequency === 'semi-monthly') {
+        iterations = 24;
+        daysToAdd = 15; // Rough estimate for semi-monthly projection
+      }
 
       for (let i = 0; i < iterations; i++) {
-        const exDate = addMonths(startDate, i * monthsToAdd);
-        // Estimated payout is 10 days after ex-date
+        let exDate: Date;
+        if (pos.frequency === 'semi-monthly') {
+          exDate = addDays(startDate, i * daysToAdd);
+        } else {
+          exDate = addMonths(startDate, i * monthsToAdd);
+        }
+        
         const payoutDate = addDays(exDate, 10);
 
         allDivs.push({
@@ -98,7 +112,7 @@ export function usePortfolio() {
           recordDate: format(exDate, 'yyyy-MM-dd'),
           payoutDate: format(payoutDate, 'yyyy-MM-dd'),
           amountPerShare: pos.dividendAmount,
-          yield: pos.purchasePrice > 0 ? (pos.dividendAmount * (12/monthsToAdd) / pos.purchasePrice) * 100 : 0,
+          yield: pos.purchasePrice > 0 ? (pos.dividendAmount * (iterations) / pos.purchasePrice) * 100 : 0,
           totalAmount: pos.shares * pos.dividendAmount,
           sharesAtTime: pos.shares
         });

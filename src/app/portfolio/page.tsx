@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Trash2, Edit2, Search, Loader2 } from "lucide-react";
+import { Plus, Trash2, Search, Loader2 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { format } from 'date-fns';
@@ -101,6 +101,7 @@ export default function Portfolio() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="semi-monthly">Semi-Monthly (2x / Month)</SelectItem>
                       <SelectItem value="quarterly">Quarterly</SelectItem>
                       <SelectItem value="annually">Annually</SelectItem>
                     </SelectContent>
@@ -153,7 +154,7 @@ export default function Portfolio() {
                     <TableCell>{pos.shares}</TableCell>
                     <TableCell>${pos.purchasePrice.toFixed(2)}</TableCell>
                     <TableCell>${pos.dividendAmount.toFixed(3)}</TableCell>
-                    <TableCell className="capitalize">{pos.frequency}</TableCell>
+                    <TableCell className="capitalize">{pos.frequency.replace('-', ' ')}</TableCell>
                     <TableCell>{pos.nextExDate}</TableCell>
                     <TableCell className="text-right space-x-2">
                       <Button 

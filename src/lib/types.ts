@@ -1,5 +1,5 @@
 export type TransactionType = 'buy' | 'sell' | 'dividend';
-export type DividendFrequency = 'monthly' | 'quarterly' | 'annually';
+export type DividendFrequency = 'monthly' | 'quarterly' | 'annually' | 'semi-monthly';
 
 export interface PortfolioPosition {
   id: string;
