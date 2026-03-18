@@ -12,8 +12,8 @@ export function usePortfolio() {
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    const savedTransactions = localStorage.getItem('dw_transactions_v9');
-    const savedAdjustments = localStorage.getItem('dw_adjustments_v9');
+    const savedTransactions = localStorage.getItem('dw_transactions_v10');
+    const savedAdjustments = localStorage.getItem('dw_adjustments_v10');
     
     if (savedTransactions) {
       setTransactions(JSON.parse(savedTransactions));
@@ -30,8 +30,8 @@ export function usePortfolio() {
 
   useEffect(() => {
     if (isLoaded) {
-      localStorage.setItem('dw_transactions_v9', JSON.stringify(transactions));
-      localStorage.setItem('dw_adjustments_v9', JSON.stringify(manualAdjustments));
+      localStorage.setItem('dw_transactions_v10', JSON.stringify(transactions));
+      localStorage.setItem('dw_adjustments_v10', JSON.stringify(manualAdjustments));
     }
   }, [transactions, manualAdjustments, isLoaded]);
 
@@ -48,37 +48,33 @@ export function usePortfolio() {
     const sortedTx = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     sortedTx.forEach(tx => {
-      if (!posMap[tx.ticker]) {
-        posMap[tx.ticker] = { 
+      const ticker = tx.ticker.toUpperCase();
+      if (!posMap[ticker]) {
+        posMap[ticker] = { 
           shares: 0, 
           totalCost: 0, 
-          ticker: tx.ticker,
+          ticker: ticker,
           dividendAmount: 0,
           frequency: 'quarterly',
           nextExDate: format(new Date(), 'yyyy-MM-dd')
         };
       }
 
-      const p = posMap[tx.ticker];
+      const p = posMap[ticker];
 
       if (tx.type === 'buy') {
-        p.shares += tx.shares;
-        p.totalCost += tx.totalAmount;
-        if (tx.dividendAmount !== undefined) p.dividendAmount = tx.dividendAmount;
+        p.shares += (Number(tx.shares) || 0);
+        p.totalCost += (Number(tx.totalAmount) || 0);
+        if (tx.dividendAmount !== undefined) p.dividendAmount = Number(tx.dividendAmount) || 0;
         if (tx.frequency !== undefined) p.frequency = tx.frequency;
-        if (tx.nextExDate !== undefined) {
-          p.nextExDate = tx.nextExDate;
-          // When a user updates the "main" next ex date, we reset adjustments to allow fresh projection
-          if (manualAdjustments[tx.ticker]) {
-            // Note: In a production app we might handle this more surgically
-          }
-        }
+        if (tx.nextExDate !== undefined) p.nextExDate = tx.nextExDate;
       } else if (tx.type === 'sell') {
         const avgCost = p.shares > 0 ? p.totalCost / p.shares : 0;
-        p.shares -= tx.shares;
-        p.totalCost -= (tx.shares * avgCost);
+        const sellShares = (Number(tx.shares) || 0);
+        p.shares -= sellShares;
+        p.totalCost -= (sellShares * avgCost);
       } else if (tx.type === 'dividend') {
-        if (tx.dividendAmount !== undefined) p.dividendAmount = tx.dividendAmount;
+        if (tx.dividendAmount !== undefined) p.dividendAmount = Number(tx.dividendAmount) || 0;
       }
     });
 
@@ -88,8 +84,8 @@ export function usePortfolio() {
         id: p.ticker,
         ticker: p.ticker,
         shares: p.shares,
-        totalCost: p.totalCost,
-        averagePrice: p.shares > 0 ? p.totalCost / p.shares : 0,
+        totalCost: Math.max(0, p.totalCost),
+        averagePrice: p.shares > 0 ? Math.max(0, p.totalCost / p.shares) : 0,
         dividendAmount: p.dividendAmount,
         frequency: p.frequency,
         nextExDate: p.nextExDate,
@@ -98,13 +94,18 @@ export function usePortfolio() {
   }, [transactions, manualAdjustments]);
 
   const addTransaction = useCallback((tx: Omit<TransactionRecord, 'id'>) => {
+    // Improved unique ID generation for batch operations
+    const uniqueId = `t_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const transaction: TransactionRecord = {
       ...tx,
-      id: `t_${Date.now()}`,
-      ticker: tx.ticker.toUpperCase()
+      id: uniqueId,
+      ticker: tx.ticker.toUpperCase(),
+      shares: Number(tx.shares) || 0,
+      price: Number(tx.price) || 0,
+      totalAmount: Number(tx.totalAmount) || 0,
+      dividendAmount: tx.dividendAmount !== undefined ? Number(tx.dividendAmount) || 0 : undefined
     };
     
-    // Clear manual overrides if the baseline nextExDate or frequency is changed via a new Buy
     if (tx.type === 'buy') {
       setManualAdjustments(prev => {
         const next = { ...prev };
@@ -145,9 +146,9 @@ export function usePortfolio() {
           exDate: exDateStr,
           recordDate: exDateStr,
           payoutDate: tx.date,
-          amountPerShare: tx.price, 
-          totalAmount: tx.totalAmount,
-          sharesAtTime: tx.shares,
+          amountPerShare: Number(tx.price) || 0, 
+          totalAmount: Number(tx.totalAmount) || 0,
+          sharesAtTime: Number(tx.shares) || 0,
           index: -1,
           status: 'edited'
         });
@@ -213,8 +214,8 @@ export function usePortfolio() {
         const sharesAtDate = transactions
           .filter(tx => tx.ticker === pos.ticker && isBefore(parseISO(tx.date), startOfDay(parseISO(exDateStr))))
           .reduce((sum, tx) => {
-            if (tx.type === 'buy') return sum + tx.shares;
-            if (tx.type === 'sell') return sum - tx.shares;
+            if (tx.type === 'buy') return sum + (Number(tx.shares) || 0);
+            if (tx.type === 'sell') return sum - (Number(tx.shares) || 0);
             return sum;
           }, 0);
 

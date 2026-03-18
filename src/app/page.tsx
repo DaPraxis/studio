@@ -27,14 +27,12 @@ export default function Dashboard() {
   const now = new Date();
   
   const upcomingDivs = allDivs.filter(d => isAfter(new Date(d.payoutDate), now));
-  const totalUpcomingPayout = upcomingDivs.reduce((acc, d) => acc + d.totalAmount, 0);
+  const totalUpcomingPayout = upcomingDivs.reduce((acc, d) => acc + (Number(d.totalAmount) || 0), 0);
   
-  const totalPortfolioCost = positions.reduce((acc, p) => acc + p.totalCost, 0);
+  const totalPortfolioCost = positions.reduce((acc, p) => acc + (Number(p.totalCost) || 0), 0);
   
-  // Calculate annual income based on the 12-month projections
   const annualIncome = allDivs.reduce((acc, d) => {
-    // We sum all projected/base dividends in the generated list
-    return acc + d.totalAmount;
+    return acc + (Number(d.totalAmount) || 0);
   }, 0);
 
   const yieldPercentage = totalPortfolioCost > 0 
