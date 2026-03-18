@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useMemo } from 'react';
@@ -9,7 +10,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { AIDividendExplainer } from '@/components/ai-dividend-explainer';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
@@ -178,15 +178,6 @@ export default function DividendCalendar() {
                       <div className="text-xs text-muted-foreground">{ev.sharesAtTime} Shares @ ${ev.amountPerShare.toFixed(3)}</div>
                     </div>
                   </div>
-                  
-                  <AIDividendExplainer input={{
-                    ticker: ev.ticker,
-                    eventType: isPayout ? 'payout' : 'ex-dividend',
-                    eventDate: format(selectedDay, 'yyyy-MM-dd'),
-                    dividendAmountPerShare: ev.amountPerShare,
-                    sharesOwned: ev.sharesAtTime,
-                    totalDividendAmount: ev.totalAmount
-                  }} />
                 </div>
               );
             })}
