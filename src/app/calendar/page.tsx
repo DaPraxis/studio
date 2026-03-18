@@ -3,8 +3,7 @@
 
 import { useState, useMemo } from 'react';
 import { usePortfolio } from "@/hooks/use-portfolio";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, parseISO } from 'date-fns';
 import { ChevronLeft, ChevronRight, Edit3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -31,7 +30,7 @@ export default function DividendCalendar() {
 
   const getEventsForDay = (date: Date) => {
     return allDivs.filter(div => 
-      isSameDay(new Date(div.payoutDate), date) || isSameDay(new Date(div.exDate), date)
+      isSameDay(parseISO(div.payoutDate), date) || isSameDay(parseISO(div.exDate), date)
     );
   };
 
@@ -96,7 +95,7 @@ export default function DividendCalendar() {
               <div className="text-right text-sm font-medium text-muted-foreground">{format(day, 'd')}</div>
               <div className="mt-1 space-y-1">
                 {events.slice(0, 3).map((ev, idx) => {
-                  const isPayout = isSameDay(new Date(ev.payoutDate), day);
+                  const isPayout = isSameDay(parseISO(ev.payoutDate), day);
                   return (
                     <div 
                       key={idx} 
@@ -106,7 +105,7 @@ export default function DividendCalendar() {
                       )}
                     >
                       <span className="truncate">{ev.ticker} {isPayout ? `$${ev.totalAmount.toFixed(0)}` : 'Ex'}</span>
-                      {!isPayout && ev.status === 'edited' && <div className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
+                      {ev.status === 'edited' && <div className="w-1.5 h-1.5 rounded-full bg-accent shrink-0 ml-1" />}
                     </div>
                   );
                 })}
@@ -127,8 +126,8 @@ export default function DividendCalendar() {
           </DialogHeader>
           <div className="space-y-4 py-4">
             {selectedDay && getEventsForDay(selectedDay).map((ev, i) => {
-              const isPayout = isSameDay(new Date(ev.payoutDate), selectedDay);
-              const isExDate = isSameDay(new Date(ev.exDate), selectedDay);
+              const isPayout = isSameDay(parseISO(ev.payoutDate), selectedDay);
+              const isExDate = isSameDay(parseISO(ev.exDate), selectedDay);
               
               return (
                 <div key={i} className="flex flex-col gap-3 p-4 border rounded-xl bg-muted/20 relative group">
@@ -154,7 +153,7 @@ export default function DividendCalendar() {
                           <Badge variant={isPayout ? "default" : "secondary"}>
                             {isPayout ? "Payout Date" : "Ex-Dividend Date"}
                           </Badge>
-                          {isExDate && (
+                          {isExDate && ev.index >= 0 && (
                             <Button 
                               variant="ghost" 
                               size="icon" 
@@ -199,11 +198,20 @@ export default function DividendCalendar() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Actual Ex-Dividend Date</Label>
-              <Input type="date" value={editFields.date} onChange={e => setEditFields(prev => ({ ...prev, date: e.target.value }))} />
+              <Input 
+                type="date" 
+                value={editFields.date} 
+                onChange={e => setEditFields(prev => ({ ...prev, date: e.target.value }))} 
+              />
             </div>
             <div className="space-y-2">
               <Label>Dividend Amount (Per Share)</Label>
-              <Input type="number" step="0.001" value={editFields.amount} onChange={e => setEditFields(prev => ({ ...prev, amount: Number(e.target.value) }))} />
+              <Input 
+                type="number" 
+                step="0.001" 
+                value={editFields.amount} 
+                onChange={e => setEditFields(prev => ({ ...prev, amount: Number(e.target.value) }))} 
+              />
             </div>
           </div>
           <DialogFooter>

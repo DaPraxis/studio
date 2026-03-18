@@ -1,9 +1,10 @@
+
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { PortfolioPosition, TransactionRecord, DividendData, DividendFrequency } from '@/lib/types';
 import { INITIAL_TRANSACTIONS } from '@/lib/mock-data';
-import { format, addMonths, addDays, isBefore, parseISO } from 'date-fns';
+import { format, addMonths, addDays, isBefore, parseISO, startOfDay } from 'date-fns';
 
 export function usePortfolio() {
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
@@ -11,8 +12,8 @@ export function usePortfolio() {
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    const savedTransactions = localStorage.getItem('dw_transactions_v8');
-    const savedAdjustments = localStorage.getItem('dw_adjustments_v8');
+    const savedTransactions = localStorage.getItem('dw_transactions_v9');
+    const savedAdjustments = localStorage.getItem('dw_adjustments_v9');
     
     if (savedTransactions) {
       setTransactions(JSON.parse(savedTransactions));
@@ -29,12 +30,11 @@ export function usePortfolio() {
 
   useEffect(() => {
     if (isLoaded) {
-      localStorage.setItem('dw_transactions_v8', JSON.stringify(transactions));
-      localStorage.setItem('dw_adjustments_v8', JSON.stringify(manualAdjustments));
+      localStorage.setItem('dw_transactions_v9', JSON.stringify(transactions));
+      localStorage.setItem('dw_adjustments_v9', JSON.stringify(manualAdjustments));
     }
   }, [transactions, manualAdjustments, isLoaded]);
 
-  // Derive Positions from Transactions
   const positions = useMemo(() => {
     const posMap: Record<string, { 
       shares: number, 
@@ -66,7 +66,13 @@ export function usePortfolio() {
         p.totalCost += tx.totalAmount;
         if (tx.dividendAmount !== undefined) p.dividendAmount = tx.dividendAmount;
         if (tx.frequency !== undefined) p.frequency = tx.frequency;
-        if (tx.nextExDate !== undefined) p.nextExDate = tx.nextExDate;
+        if (tx.nextExDate !== undefined) {
+          p.nextExDate = tx.nextExDate;
+          // When a user updates the "main" next ex date, we reset adjustments to allow fresh projection
+          if (manualAdjustments[tx.ticker]) {
+            // Note: In a production app we might handle this more surgically
+          }
+        }
       } else if (tx.type === 'sell') {
         const avgCost = p.shares > 0 ? p.totalCost / p.shares : 0;
         p.shares -= tx.shares;
@@ -97,6 +103,16 @@ export function usePortfolio() {
       id: `t_${Date.now()}`,
       ticker: tx.ticker.toUpperCase()
     };
+    
+    // Clear manual overrides if the baseline nextExDate or frequency is changed via a new Buy
+    if (tx.type === 'buy') {
+      setManualAdjustments(prev => {
+        const next = { ...prev };
+        delete next[tx.ticker.toUpperCase()];
+        return next;
+      });
+    }
+
     setTransactions(prev => [...prev, transaction]);
   }, []);
 
@@ -121,16 +137,15 @@ export function usePortfolio() {
   const getAllDividends = useCallback(() => {
     const allDivs: DividendData[] = [];
     
-    // 1. Add Actual Recorded Dividend Payouts from History
     transactions.forEach(tx => {
       if (tx.type === 'dividend') {
-        const exDate = tx.nextExDate || tx.date;
+        const exDateStr = tx.nextExDate || tx.date;
         allDivs.push({
           ticker: tx.ticker,
-          exDate: exDate,
-          recordDate: exDate,
+          exDate: exDateStr,
+          recordDate: exDateStr,
           payoutDate: tx.date,
-          amountPerShare: tx.price, // For dividend tx, price is used as amount per share
+          amountPerShare: tx.price, 
           totalAmount: tx.totalAmount,
           sharesAtTime: tx.shares,
           index: -1,
@@ -139,9 +154,8 @@ export function usePortfolio() {
       }
     });
 
-    // 2. Generate Projections based on current positions and history
     positions.forEach(pos => {
-      const baseDate = new Date(pos.nextExDate);
+      const baseDate = parseISO(pos.nextExDate);
       const baseAmount = pos.dividendAmount;
       
       let iterations = 0;
@@ -166,7 +180,7 @@ export function usePortfolio() {
 
         if (adjustment) {
           if (adjustment.date) {
-            exDate = new Date(adjustment.date);
+            exDate = parseISO(adjustment.date);
             currentAnchorDate = exDate;
           } else {
             const diff = i - lastAnchorIndex;
@@ -174,12 +188,14 @@ export function usePortfolio() {
               ? addDays(currentAnchorDate, diff * daysStep)
               : addMonths(currentAnchorDate, diff * monthsStep);
           }
+          
           if (adjustment.amount !== undefined) {
             amountPerShare = adjustment.amount;
             currentAmount = amountPerShare;
           } else {
             amountPerShare = currentAmount;
           }
+          
           status = 'edited';
           lastAnchorIndex = i;
         } else {
@@ -194,9 +210,8 @@ export function usePortfolio() {
         const payoutDate = addDays(exDate, 10);
         const exDateStr = format(exDate, 'yyyy-MM-dd');
 
-        // QUALIFICATION LOGIC: Shares must exist BEFORE the ex-dividend date (exclusive)
         const sharesAtDate = transactions
-          .filter(tx => tx.ticker === pos.ticker && isBefore(parseISO(tx.date), parseISO(exDateStr)))
+          .filter(tx => tx.ticker === pos.ticker && isBefore(parseISO(tx.date), startOfDay(parseISO(exDateStr))))
           .reduce((sum, tx) => {
             if (tx.type === 'buy') return sum + tx.shares;
             if (tx.type === 'sell') return sum - tx.shares;
