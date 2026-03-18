@@ -1,15 +1,20 @@
+
 "use client"
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { PortfolioPosition, TransactionRecord, DividendData } from '@/lib/types';
-import { INITIAL_POSITIONS, INITIAL_TRANSACTIONS, getDividendsForTicker } from '@/lib/mock-data';
+import { INITIAL_POSITIONS, INITIAL_TRANSACTIONS } from '@/lib/mock-data';
 import { format } from 'date-fns';
+import { getTickerFinancials } from '@/app/actions/financials';
 
 export function usePortfolio() {
   const [positions, setPositions] = useState<PortfolioPosition[]>([]);
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
+  const [dividendMap, setDividendMap] = useState<Record<string, DividendData[]>>({});
   const [isLoaded, setIsLoaded] = useState(false);
+  const [isFetchingData, setIsFetchingData] = useState(false);
 
+  // Initial Load
   useEffect(() => {
     const savedPositions = localStorage.getItem('dw_positions');
     const savedTransactions = localStorage.getItem('dw_transactions');
@@ -24,12 +29,41 @@ export function usePortfolio() {
     setIsLoaded(true);
   }, []);
 
+  // Sync to LocalStorage
   useEffect(() => {
     if (isLoaded) {
       localStorage.setItem('dw_positions', JSON.stringify(positions));
       localStorage.setItem('dw_transactions', JSON.stringify(transactions));
     }
   }, [positions, transactions, isLoaded]);
+
+  // Fetch Live Data for Tickers
+  useEffect(() => {
+    async function fetchAllTickerData() {
+      if (!isLoaded || positions.length === 0) return;
+      
+      setIsFetchingData(true);
+      const newDividendMap: Record<string, DividendData[]> = { ...dividendMap };
+      let changed = false;
+
+      for (const pos of positions) {
+        if (!newDividendMap[pos.ticker]) {
+          const data = await getTickerFinancials(pos.ticker);
+          if (data) {
+            newDividendMap[pos.ticker] = data.dividendHistory;
+            changed = true;
+          }
+        }
+      }
+
+      if (changed) {
+        setDividendMap(newDividendMap);
+      }
+      setIsFetchingData(false);
+    }
+
+    fetchAllTickerData();
+  }, [positions, isLoaded]);
 
   const addPosition = useCallback((newPos: Omit<PortfolioPosition, 'id'>) => {
     const id = Math.random().toString(36).substring(7);
@@ -65,8 +99,8 @@ export function usePortfolio() {
       type: 'sell',
       date: format(new Date(), 'yyyy-MM-dd'),
       shares: pos.shares,
-      price: 0, // Simplified
-      totalAmount: 0 // Simplified
+      price: 0,
+      totalAmount: 0
     };
     setTransactions(prev => [transaction, ...prev]);
   }, [positions]);
@@ -74,7 +108,7 @@ export function usePortfolio() {
   const getAllDividends = useCallback(() => {
     const allDivs: Array<DividendData & { totalAmount: number; sharesAtTime: number }> = [];
     positions.forEach(pos => {
-      const divs = getDividendsForTicker(pos.ticker);
+      const divs = dividendMap[pos.ticker] || [];
       divs.forEach(d => {
         allDivs.push({
           ...d,
@@ -83,8 +117,13 @@ export function usePortfolio() {
         });
       });
     });
-    return allDivs;
-  }, [positions]);
+    // Sort by payout date descending
+    return allDivs.sort((a, b) => new Date(b.payoutDate).getTime() - new Date(a.payoutDate).getTime());
+  }, [positions, dividendMap]);
+
+  const getTickerData = useCallback((ticker: string) => {
+    return dividendMap[ticker] || [];
+  }, [dividendMap]);
 
   return {
     positions,
@@ -93,6 +132,8 @@ export function usePortfolio() {
     updatePosition,
     deletePosition,
     getAllDividends,
-    isLoaded
+    getTickerData,
+    isLoaded,
+    isFetchingData
   };
 }
