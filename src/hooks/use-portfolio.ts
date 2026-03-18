@@ -1,7 +1,7 @@
 
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { PortfolioPosition, TransactionRecord, DividendData } from '@/lib/types';
 import { INITIAL_POSITIONS, INITIAL_TRANSACTIONS } from '@/lib/mock-data';
 import { format } from 'date-fns';
@@ -14,7 +14,7 @@ export function usePortfolio() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isFetchingData, setIsFetchingData] = useState(false);
 
-  // Initial Load
+  // Initial Load from LocalStorage
   useEffect(() => {
     const savedPositions = localStorage.getItem('dw_positions');
     const savedTransactions = localStorage.getItem('dw_transactions');
@@ -37,33 +37,56 @@ export function usePortfolio() {
     }
   }, [positions, transactions, isLoaded]);
 
-  // Fetch Live Data for Tickers
+  // Fetch Live Data for Tickers in Parallel
   useEffect(() => {
+    let isCancelled = false;
+
     async function fetchAllTickerData() {
       if (!isLoaded || positions.length === 0) return;
       
-      setIsFetchingData(true);
-      const newDividendMap: Record<string, DividendData[]> = { ...dividendMap };
-      let changed = false;
+      // Filter out tickers we already have in the map
+      const tickersToFetch = [...new Set(positions.map(p => p.ticker))]
+        .filter(t => !dividendMap[t]);
 
-      for (const pos of positions) {
-        if (!newDividendMap[pos.ticker]) {
-          const data = await getTickerFinancials(pos.ticker);
-          if (data) {
-            newDividendMap[pos.ticker] = data.dividendHistory;
-            changed = true;
-          }
+      if (tickersToFetch.length === 0) return;
+
+      setIsFetchingData(true);
+      try {
+        // Fetch all missing tickers in parallel for better performance
+        const results = await Promise.all(
+          tickersToFetch.map(ticker => getTickerFinancials(ticker))
+        );
+
+        if (isCancelled) return;
+
+        setDividendMap(prev => {
+          const next = { ...prev };
+          results.forEach((data, index) => {
+            const ticker = tickersToFetch[index];
+            if (data && data.dividendHistory) {
+              next[ticker] = data.dividendHistory;
+            } else {
+              // Mark as empty array to avoid re-fetching failed ones in this session
+              next[ticker] = [];
+            }
+          });
+          return next;
+        });
+      } catch (error) {
+        console.error("Critical error in portfolio data fetch:", error);
+      } finally {
+        if (!isCancelled) {
+          setIsFetchingData(false);
         }
       }
-
-      if (changed) {
-        setDividendMap(newDividendMap);
-      }
-      setIsFetchingData(false);
     }
 
     fetchAllTickerData();
-  }, [positions, isLoaded]);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [positions, isLoaded, dividendMap]);
 
   const addPosition = useCallback((newPos: Omit<PortfolioPosition, 'id'>) => {
     const id = Math.random().toString(36).substring(7);
@@ -117,7 +140,7 @@ export function usePortfolio() {
         });
       });
     });
-    // Sort by payout date descending
+    // Sort by payout date descending (latest first)
     return allDivs.sort((a, b) => new Date(b.payoutDate).getTime() - new Date(a.payoutDate).getTime());
   }, [positions, dividendMap]);
 
