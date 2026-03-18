@@ -134,7 +134,7 @@ export function usePortfolio() {
           totalAmount: tx.totalAmount,
           sharesAtTime: tx.shares,
           index: -1,
-          status: 'edited' // Logged history is treated as "final/edited"
+          status: 'edited'
         });
       }
     });
@@ -194,9 +194,9 @@ export function usePortfolio() {
         const payoutDate = addDays(exDate, 10);
         const exDateStr = format(exDate, 'yyyy-MM-dd');
 
-        // CALCULATE SHARES HELD AT THIS SPECIFIC DATE
+        // QUALIFICATION LOGIC: Shares must exist BEFORE the ex-dividend date (exclusive)
         const sharesAtDate = transactions
-          .filter(tx => tx.ticker === pos.ticker && !isBefore(parseISO(exDateStr), parseISO(tx.date)))
+          .filter(tx => tx.ticker === pos.ticker && isBefore(parseISO(tx.date), parseISO(exDateStr)))
           .reduce((sum, tx) => {
             if (tx.type === 'buy') return sum + tx.shares;
             if (tx.type === 'sell') return sum - tx.shares;
@@ -219,7 +219,6 @@ export function usePortfolio() {
       }
     });
 
-    // Remove duplicates (if a history item and projection overlap)
     const seen = new Set();
     const uniqueDivs = allDivs.filter(div => {
       const key = `${div.ticker}-${div.exDate}`;
