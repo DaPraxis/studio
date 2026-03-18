@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { PortfolioPosition, TransactionRecord, DividendData, DividendFrequency } from '@/lib/types';
 import { INITIAL_TRANSACTIONS } from '@/lib/mock-data';
-import { format, addMonths, addDays, isAfter } from 'date-fns';
+import { format, addMonths, addDays, isBefore, parseISO } from 'date-fns';
 
 export function usePortfolio() {
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
@@ -11,8 +11,8 @@ export function usePortfolio() {
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    const savedTransactions = localStorage.getItem('dw_transactions_v7');
-    const savedAdjustments = localStorage.getItem('dw_adjustments_v7');
+    const savedTransactions = localStorage.getItem('dw_transactions_v8');
+    const savedAdjustments = localStorage.getItem('dw_adjustments_v8');
     
     if (savedTransactions) {
       setTransactions(JSON.parse(savedTransactions));
@@ -29,8 +29,8 @@ export function usePortfolio() {
 
   useEffect(() => {
     if (isLoaded) {
-      localStorage.setItem('dw_transactions_v7', JSON.stringify(transactions));
-      localStorage.setItem('dw_adjustments_v7', JSON.stringify(manualAdjustments));
+      localStorage.setItem('dw_transactions_v8', JSON.stringify(transactions));
+      localStorage.setItem('dw_adjustments_v8', JSON.stringify(manualAdjustments));
     }
   }, [transactions, manualAdjustments, isLoaded]);
 
@@ -45,7 +45,6 @@ export function usePortfolio() {
       nextExDate: string
     }> = {};
 
-    // Sort transactions by date to ensure dividend info updates correctly
     const sortedTx = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     sortedTx.forEach(tx => {
@@ -65,18 +64,13 @@ export function usePortfolio() {
       if (tx.type === 'buy') {
         p.shares += tx.shares;
         p.totalCost += tx.totalAmount;
-        // Update dividend settings if provided in the buy log
         if (tx.dividendAmount !== undefined) p.dividendAmount = tx.dividendAmount;
         if (tx.frequency !== undefined) p.frequency = tx.frequency;
-        if (tx.nextExDate !== undefined) {
-          p.nextExDate = tx.nextExDate;
-          // When nextExDate is updated via a transaction, we should technically clear adjustments,
-          // but for this MVP we'll let the user manage that.
-        }
+        if (tx.nextExDate !== undefined) p.nextExDate = tx.nextExDate;
       } else if (tx.type === 'sell') {
         const avgCost = p.shares > 0 ? p.totalCost / p.shares : 0;
         p.shares -= tx.shares;
-        p.totalCost -= (tx.shares * avgCost); // Remove proportional cost
+        p.totalCost -= (tx.shares * avgCost);
       } else if (tx.type === 'dividend') {
         if (tx.dividendAmount !== undefined) p.dividendAmount = tx.dividendAmount;
       }
@@ -127,6 +121,25 @@ export function usePortfolio() {
   const getAllDividends = useCallback(() => {
     const allDivs: DividendData[] = [];
     
+    // 1. Add Actual Recorded Dividend Payouts from History
+    transactions.forEach(tx => {
+      if (tx.type === 'dividend') {
+        const exDate = tx.nextExDate || tx.date;
+        allDivs.push({
+          ticker: tx.ticker,
+          exDate: exDate,
+          recordDate: exDate,
+          payoutDate: tx.date,
+          amountPerShare: tx.price, // For dividend tx, price is used as amount per share
+          totalAmount: tx.totalAmount,
+          sharesAtTime: tx.shares,
+          index: -1,
+          status: 'edited' // Logged history is treated as "final/edited"
+        });
+      }
+    });
+
+    // 2. Generate Projections based on current positions and history
     positions.forEach(pos => {
       const baseDate = new Date(pos.nextExDate);
       const baseAmount = pos.dividendAmount;
@@ -161,49 +174,62 @@ export function usePortfolio() {
               ? addDays(currentAnchorDate, diff * daysStep)
               : addMonths(currentAnchorDate, diff * monthsStep);
           }
-
           if (adjustment.amount !== undefined) {
             amountPerShare = adjustment.amount;
             currentAmount = amountPerShare;
           } else {
             amountPerShare = currentAmount;
           }
-
           status = 'edited';
           lastAnchorIndex = i;
-        } 
-        else {
+        } else {
           const diff = i - lastAnchorIndex;
-          if (pos.frequency === 'semi-monthly') {
-            exDate = addDays(currentAnchorDate, diff * daysStep);
-          } else {
-            exDate = addMonths(currentAnchorDate, diff * monthsStep);
-          }
-          
+          exDate = pos.frequency === 'semi-monthly' 
+            ? addDays(currentAnchorDate, diff * daysStep)
+            : addMonths(currentAnchorDate, diff * monthsStep);
           amountPerShare = currentAmount;
-          
           if (i === 0) status = 'base';
-          else status = 'projected';
         }
 
         const payoutDate = addDays(exDate, 10);
-        
-        allDivs.push({
-          ticker: pos.ticker,
-          exDate: format(exDate, 'yyyy-MM-dd'),
-          recordDate: format(exDate, 'yyyy-MM-dd'),
-          payoutDate: format(payoutDate, 'yyyy-MM-dd'),
-          amountPerShare: amountPerShare,
-          totalAmount: pos.shares * amountPerShare,
-          sharesAtTime: pos.shares,
-          index: i,
-          status: status
-        });
+        const exDateStr = format(exDate, 'yyyy-MM-dd');
+
+        // CALCULATE SHARES HELD AT THIS SPECIFIC DATE
+        const sharesAtDate = transactions
+          .filter(tx => tx.ticker === pos.ticker && !isBefore(parseISO(exDateStr), parseISO(tx.date)))
+          .reduce((sum, tx) => {
+            if (tx.type === 'buy') return sum + tx.shares;
+            if (tx.type === 'sell') return sum - tx.shares;
+            return sum;
+          }, 0);
+
+        if (sharesAtDate > 0) {
+          allDivs.push({
+            ticker: pos.ticker,
+            exDate: exDateStr,
+            recordDate: exDateStr,
+            payoutDate: format(payoutDate, 'yyyy-MM-dd'),
+            amountPerShare: amountPerShare,
+            totalAmount: sharesAtDate * amountPerShare,
+            sharesAtTime: sharesAtDate,
+            index: i,
+            status: status
+          });
+        }
       }
     });
 
-    return allDivs.sort((a, b) => new Date(a.exDate).getTime() - new Date(b.exDate).getTime());
-  }, [positions]);
+    // Remove duplicates (if a history item and projection overlap)
+    const seen = new Set();
+    const uniqueDivs = allDivs.filter(div => {
+      const key = `${div.ticker}-${div.exDate}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    return uniqueDivs.sort((a, b) => new Date(a.exDate).getTime() - new Date(b.exDate).getTime());
+  }, [positions, transactions]);
 
   return {
     positions,

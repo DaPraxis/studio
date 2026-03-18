@@ -25,7 +25,6 @@ export default function HistoryPage() {
     shares: 0,
     price: 0,
     totalAmount: 0,
-    // Optional Div fields
     dividendAmount: 0,
     frequency: 'quarterly' as DividendFrequency,
     nextExDate: format(new Date(), 'yyyy-MM-dd')
@@ -45,7 +44,7 @@ export default function HistoryPage() {
       totalAmount: Number(finalTotal),
       dividendAmount: (formData.type === 'buy' || formData.type === 'dividend') ? Number(formData.dividendAmount) : undefined,
       frequency: formData.type === 'buy' ? formData.frequency : undefined,
-      nextExDate: formData.type === 'buy' ? formData.nextExDate : undefined
+      nextExDate: (formData.type === 'buy' || formData.type === 'dividend') ? formData.nextExDate : undefined
     });
     
     setIsAddOpen(false);
@@ -106,7 +105,7 @@ export default function HistoryPage() {
                     <SelectContent>
                       <SelectItem value="buy">Buy</SelectItem>
                       <SelectItem value="sell">Sell</SelectItem>
-                      <SelectItem value="dividend">Dividend</SelectItem>
+                      <SelectItem value="dividend">Dividend Payout</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -114,7 +113,7 @@ export default function HistoryPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>Date</Label>
+                  <Label>Transaction Date</Label>
                   <Input 
                     type="date" 
                     value={formData.date} 
@@ -122,7 +121,7 @@ export default function HistoryPage() {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Total Shares</Label>
+                  <Label>Shares</Label>
                   <Input 
                     type="number" 
                     value={formData.shares} 
@@ -242,7 +241,7 @@ export default function HistoryPage() {
                           t.type === 'dividend' && "border-accent/20 text-accent bg-accent/5"
                         )}
                       >
-                        {t.type}
+                        {t.type === 'dividend' ? 'Payout' : t.type}
                       </Badge>
                     </div>
                   </TableCell>
