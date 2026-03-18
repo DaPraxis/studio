@@ -1,25 +1,27 @@
 "use client"
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { PortfolioPosition, TransactionRecord, DividendData, DividendFrequency } from '@/lib/types';
-import { INITIAL_POSITIONS, INITIAL_TRANSACTIONS } from '@/lib/mock-data';
-import { format, addMonths, addDays } from 'date-fns';
+import { INITIAL_TRANSACTIONS } from '@/lib/mock-data';
+import { format, addMonths, addDays, isAfter } from 'date-fns';
 
 export function usePortfolio() {
-  const [positions, setPositions] = useState<PortfolioPosition[]>([]);
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
+  const [manualAdjustments, setManualAdjustments] = useState<Record<string, Record<number, { date?: string; amount?: number }>>>({});
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    const savedPositions = localStorage.getItem('dw_positions_v6');
-    const savedTransactions = localStorage.getItem('dw_transactions_v6');
+    const savedTransactions = localStorage.getItem('dw_transactions_v7');
+    const savedAdjustments = localStorage.getItem('dw_adjustments_v7');
     
-    if (savedPositions && savedTransactions) {
-      setPositions(JSON.parse(savedPositions));
+    if (savedTransactions) {
       setTransactions(JSON.parse(savedTransactions));
     } else {
-      setPositions(INITIAL_POSITIONS);
       setTransactions(INITIAL_TRANSACTIONS);
+    }
+
+    if (savedAdjustments) {
+      setManualAdjustments(JSON.parse(savedAdjustments));
     }
 
     setIsLoaded(true);
@@ -27,48 +29,73 @@ export function usePortfolio() {
 
   useEffect(() => {
     if (isLoaded) {
-      localStorage.setItem('dw_positions_v6', JSON.stringify(positions));
-      localStorage.setItem('dw_transactions_v6', JSON.stringify(transactions));
+      localStorage.setItem('dw_transactions_v7', JSON.stringify(transactions));
+      localStorage.setItem('dw_adjustments_v7', JSON.stringify(manualAdjustments));
     }
-  }, [positions, transactions, isLoaded]);
+  }, [transactions, manualAdjustments, isLoaded]);
 
-  const addPosition = useCallback((newPos: Omit<PortfolioPosition, 'id'>) => {
-    const id = Math.random().toString(36).substring(7);
-    const ticker = newPos.ticker.toUpperCase();
-    const position: PortfolioPosition = { ...newPos, ticker, id, manualAdjustments: {} };
-    setPositions(prev => [...prev, position]);
-  }, []);
+  // Derive Positions from Transactions
+  const positions = useMemo(() => {
+    const posMap: Record<string, { 
+      shares: number, 
+      totalCost: number, 
+      ticker: string,
+      dividendAmount: number,
+      frequency: DividendFrequency,
+      nextExDate: string
+    }> = {};
 
-  const updatePosition = useCallback((id: string, updatedFields: Partial<PortfolioPosition>) => {
-    setPositions(prev => prev.map(p => {
-      if (p.id === id) {
-        const shouldReset = updatedFields.nextExDate !== undefined || updatedFields.dividendAmount !== undefined;
-        const nextAdjustments = shouldReset ? {} : p.manualAdjustments;
-        return { ...p, ...updatedFields, manualAdjustments: nextAdjustments };
-      }
-      return p;
-    }));
-  }, []);
+    // Sort transactions by date to ensure dividend info updates correctly
+    const sortedTx = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  const updateManualAdjustment = useCallback((posId: string, index: number, updates: { date?: string; amount?: number }) => {
-    setPositions(prev => prev.map(p => {
-      if (p.id === posId) {
-        const current = p.manualAdjustments?.[index] || {};
-        return {
-          ...p,
-          manualAdjustments: {
-            ...(p.manualAdjustments || {}),
-            [index]: { ...current, ...updates }
-          }
+    sortedTx.forEach(tx => {
+      if (!posMap[tx.ticker]) {
+        posMap[tx.ticker] = { 
+          shares: 0, 
+          totalCost: 0, 
+          ticker: tx.ticker,
+          dividendAmount: 0,
+          frequency: 'quarterly',
+          nextExDate: format(new Date(), 'yyyy-MM-dd')
         };
       }
-      return p;
-    }));
-  }, []);
 
-  const deletePosition = useCallback((id: string) => {
-    setPositions(prev => prev.filter(p => p.id !== id));
-  }, []);
+      const p = posMap[tx.ticker];
+
+      if (tx.type === 'buy') {
+        p.shares += tx.shares;
+        p.totalCost += tx.totalAmount;
+        // Update dividend settings if provided in the buy log
+        if (tx.dividendAmount !== undefined) p.dividendAmount = tx.dividendAmount;
+        if (tx.frequency !== undefined) p.frequency = tx.frequency;
+        if (tx.nextExDate !== undefined) {
+          p.nextExDate = tx.nextExDate;
+          // When nextExDate is updated via a transaction, we should technically clear adjustments,
+          // but for this MVP we'll let the user manage that.
+        }
+      } else if (tx.type === 'sell') {
+        const avgCost = p.shares > 0 ? p.totalCost / p.shares : 0;
+        p.shares -= tx.shares;
+        p.totalCost -= (tx.shares * avgCost); // Remove proportional cost
+      } else if (tx.type === 'dividend') {
+        if (tx.dividendAmount !== undefined) p.dividendAmount = tx.dividendAmount;
+      }
+    });
+
+    return Object.values(posMap)
+      .filter(p => p.shares > 0)
+      .map(p => ({
+        id: p.ticker,
+        ticker: p.ticker,
+        shares: p.shares,
+        totalCost: p.totalCost,
+        averagePrice: p.shares > 0 ? p.totalCost / p.shares : 0,
+        dividendAmount: p.dividendAmount,
+        frequency: p.frequency,
+        nextExDate: p.nextExDate,
+        manualAdjustments: manualAdjustments[p.ticker] || {}
+      })) as PortfolioPosition[];
+  }, [transactions, manualAdjustments]);
 
   const addTransaction = useCallback((tx: Omit<TransactionRecord, 'id'>) => {
     const transaction: TransactionRecord = {
@@ -76,11 +103,25 @@ export function usePortfolio() {
       id: `t_${Date.now()}`,
       ticker: tx.ticker.toUpperCase()
     };
-    setTransactions(prev => [transaction, ...prev]);
+    setTransactions(prev => [...prev, transaction]);
   }, []);
 
   const deleteTransaction = useCallback((id: string) => {
     setTransactions(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  const updateManualAdjustment = useCallback((ticker: string, index: number, updates: { date?: string; amount?: number }) => {
+    setManualAdjustments(prev => {
+      const tickerAdjustments = prev[ticker] || {};
+      const current = tickerAdjustments[index] || {};
+      return {
+        ...prev,
+        [ticker]: {
+          ...tickerAdjustments,
+          [index]: { ...current, ...updates }
+        }
+      };
+    });
   }, []);
 
   const getAllDividends = useCallback(() => {
@@ -167,12 +208,9 @@ export function usePortfolio() {
   return {
     positions,
     transactions,
-    addPosition,
-    updatePosition,
-    updateManualAdjustment,
-    deletePosition,
     addTransaction,
     deleteTransaction,
+    updateManualAdjustment,
     getAllDividends,
     isLoaded
   };

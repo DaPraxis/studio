@@ -5,13 +5,12 @@ export interface PortfolioPosition {
   id: string;
   ticker: string;
   shares: number;
-  purchaseDate: string;
-  purchasePrice: number;
-  dividendAmount: number; // Per share (Base Baseline)
+  averagePrice: number;
+  totalCost: number;
+  dividendAmount: number; 
   frequency: DividendFrequency;
-  nextExDate: string; // YYYY-MM-DD (Base Anchor)
-  isManualDate?: boolean;
-  manualAdjustments?: Record<number, { date?: string; amount?: number }>; // Maps iteration index to manual overrides
+  nextExDate: string; 
+  manualAdjustments?: Record<number, { date?: string; amount?: number }>;
 }
 
 export interface DividendData {
@@ -20,10 +19,9 @@ export interface DividendData {
   recordDate: string;
   payoutDate: string;
   amountPerShare: number;
-  yield?: number;
   totalAmount: number;
   sharesAtTime: number;
-  index: number; // Iteration index in the projection
+  index: number;
   status: 'base' | 'edited' | 'projected';
 }
 
@@ -35,11 +33,8 @@ export interface TransactionRecord {
   shares: number;
   price: number;
   totalAmount: number;
-}
-
-export interface PortfolioSummary {
-  totalValue: number;
-  annualDividend: number;
-  yieldOnCost: number;
-  upcomingPayoutsCount: number;
+  // Optional dividend info updated during a 'buy' or 'dividend' log
+  dividendAmount?: number;
+  frequency?: DividendFrequency;
+  nextExDate?: string;
 }
