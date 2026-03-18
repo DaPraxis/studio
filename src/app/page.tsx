@@ -1,10 +1,11 @@
+
 "use client"
 
 import { usePortfolio } from "@/hooks/use-portfolio";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DollarSign, PieChart, Calendar as CalendarIcon, ArrowUpRight, TrendingUp } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { format, isAfter } from "date-fns";
+import { format, isAfter, startOfDay } from "date-fns";
 import { useState, useEffect } from "react";
 
 export default function Dashboard() {
@@ -14,7 +15,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     setMounted(true);
-    setNow(new Date());
+    setNow(startOfDay(new Date()));
   }, []);
 
   if (!isLoaded || !mounted) {
@@ -32,13 +33,16 @@ export default function Dashboard() {
 
   const allDivs = getAllDividends();
   
-  const upcomingDivs = allDivs.filter(d => isAfter(new Date(d.payoutDate), now));
+  const upcomingDivs = allDivs.filter(d => isAfter(startOfDay(new Date(d.payoutDate)), now));
   const totalUpcomingPayout = upcomingDivs.reduce((acc, d) => acc + (Number(d.totalAmount) || 0), 0);
   
   const totalPortfolioCost = positions.reduce((acc, p) => acc + (Number(p.totalCost) || 0), 0);
   
-  const annualIncome = allDivs.reduce((acc, d) => {
-    return acc + (Number(d.totalAmount) || 0);
+  const annualIncome = positions.reduce((acc, p) => {
+    const multi = p.frequency === 'monthly' ? 12 : p.frequency === 'quarterly' ? 4 : p.frequency === 'semi-monthly' ? 24 : 1;
+    const amount = Number(p.dividendAmount) || 0;
+    const shares = Number(p.shares) || 0;
+    return acc + (shares * amount * multi);
   }, 0);
 
   const yieldPercentage = totalPortfolioCost > 0 
@@ -140,13 +144,13 @@ export default function Dashboard() {
               <CardTitle className="text-lg">Next Key Date</CardTitle>
             </CardHeader>
             <CardContent>
-              {allDivs.length > 0 ? (
+              {upcomingDivs.length > 0 ? (
                 <div className="space-y-2">
                   <div className="text-3xl font-bold text-accent">
-                    {format(new Date(allDivs[0].payoutDate), 'MMM dd')}
+                    {format(new Date(upcomingDivs[0].payoutDate), 'MMM dd')}
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Your next dividend payout from <strong>{allDivs[0].ticker}</strong> is arriving soon.
+                    Your next dividend payout from <strong>{upcomingDivs[0].ticker}</strong> is arriving soon.
                   </p>
                 </div>
               ) : (

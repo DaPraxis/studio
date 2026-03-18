@@ -1,3 +1,4 @@
+
 "use client"
 
 import { usePortfolio } from "@/hooks/use-portfolio";
@@ -5,8 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, TrendingUp, DollarSign, Award, ArrowUpRight } from "lucide-react";
-import { startOfMonth, endOfMonth, parseISO } from "date-fns";
+import { startOfMonth, endOfMonth, parseISO, startOfDay, isAfter, isSameDay } from "date-fns";
 import { useState, useEffect, useMemo } from "react";
+import { cn } from "@/lib/utils";
 
 export default function Portfolio() {
   const { positions, getAllDividends, isLoaded } = usePortfolio();
@@ -15,8 +17,10 @@ export default function Portfolio() {
 
   useEffect(() => {
     setMounted(true);
-    setNow(new Date());
+    setNow(startOfDay(new Date()));
   }, []);
+
+  const allDivs = useMemo(() => getAllDividends(), [getAllDividends]);
 
   const metrics = useMemo(() => {
     if (!isLoaded || !mounted) return {
@@ -28,7 +32,6 @@ export default function Portfolio() {
       topContributor: null
     };
 
-    const allDivs = getAllDividends();
     const monthStart = startOfMonth(now);
     const monthEnd = endOfMonth(now);
 
@@ -71,7 +74,24 @@ export default function Portfolio() {
       avgYield: yieldVal,
       topContributor: top
     };
-  }, [positions, getAllDividends, isLoaded, now, mounted]);
+  }, [positions, allDivs, isLoaded, now, mounted]);
+
+  const positionDisplayData = useMemo(() => {
+    return positions.map(pos => {
+      // Find the first upcoming ex-dividend event for this ticker
+      const nextEvent = allDivs.find(d => 
+        d.ticker === pos.ticker && 
+        (isAfter(parseISO(d.exDate), now) || isSameDay(parseISO(d.exDate), now))
+      );
+
+      return {
+        ...pos,
+        displayExDate: nextEvent ? nextEvent.exDate : pos.nextExDate,
+        displayDivAmount: nextEvent ? nextEvent.amountPerShare : pos.dividendAmount,
+        status: nextEvent ? nextEvent.status : 'projected'
+      };
+    });
+  }, [positions, allDivs, now]);
 
   if (!isLoaded || !mounted) return <div className="p-8 flex items-center gap-2"><Loader2 className="animate-spin" /> Loading Portfolio...</div>;
 
@@ -146,28 +166,39 @@ export default function Portfolio() {
               <TableRow>
                 <TableHead className="font-bold">Ticker</TableHead>
                 <TableHead className="font-bold">Shares</TableHead>
-                <TableHead className="font-bold">Avg. Cost</TableHead>
                 <TableHead className="font-bold">Total Cost</TableHead>
-                <TableHead className="font-bold">Current Div</TableHead>
                 <TableHead className="font-bold">Next Ex-Date</TableHead>
+                <TableHead className="font-bold">Div Amount</TableHead>
+                <TableHead className="font-bold">Status</TableHead>
                 <TableHead className="font-bold">Frequency</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {positions.map((pos) => (
+              {positionDisplayData.map((pos) => (
                 <TableRow key={pos.ticker}>
                   <TableCell className="font-bold text-primary">{pos.ticker}</TableCell>
                   <TableCell className="font-medium">{pos.shares}</TableCell>
-                  <TableCell>${Number(pos.averagePrice || 0).toFixed(2)}</TableCell>
                   <TableCell className="font-semibold">${Number(pos.totalCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
-                  <TableCell className="text-accent font-bold">${Number(pos.dividendAmount || 0).toFixed(3)}</TableCell>
-                  <TableCell>{pos.nextExDate}</TableCell>
+                  <TableCell>{pos.displayExDate}</TableCell>
+                  <TableCell className="text-accent font-bold">${Number(pos.displayDivAmount || 0).toFixed(3)}</TableCell>
                   <TableCell>
-                    <Badge variant="secondary" className="capitalize">{pos.frequency.replace('-', ' ')}</Badge>
+                    <Badge 
+                      variant={pos.status === 'edited' ? "default" : "outline"}
+                      className={cn(
+                        "capitalize text-[10px] px-1.5 h-4",
+                        pos.status === 'edited' && "bg-accent hover:bg-accent",
+                        pos.status === 'base' && "border-primary text-primary"
+                      )}
+                    >
+                      {pos.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary" className="capitalize text-[10px]">{pos.frequency.replace('-', ' ')}</Badge>
                   </TableCell>
                 </TableRow>
               ))}
-              {positions.length === 0 && (
+              {positionDisplayData.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center py-20 text-muted-foreground">
                     No active positions. Log a "Buy" in History to get started.
