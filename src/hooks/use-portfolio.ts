@@ -120,6 +120,11 @@ export function usePortfolio() {
     setTransactions(prev => prev.filter(t => t.id !== id));
   }, []);
 
+  const clearAll = useCallback(() => {
+    setTransactions([]);
+    setManualAdjustments({});
+  }, []);
+
   const updateManualAdjustment = useCallback((ticker: string, index: number, updates: { date?: string; amount?: number }) => {
     setManualAdjustments(prev => {
       const stockAdjs = prev[ticker] || {};
@@ -262,6 +267,7 @@ export function usePortfolio() {
     manualAdjustments,
     addTransaction,
     deleteTransaction,
+    clearAll,
     updateManualAdjustment,
     getAllDividends,
     importData,
