@@ -1,4 +1,3 @@
-
 "use client"
 
 import { useState, useEffect, useCallback } from 'react';
@@ -37,43 +36,42 @@ export function usePortfolio() {
     }
   }, [positions, transactions, isLoaded]);
 
-  // Fetch Live Data for Tickers in Parallel
+  // Fetch Live Data for Tickers
   useEffect(() => {
     let isCancelled = false;
 
     async function fetchAllTickerData() {
       if (!isLoaded || positions.length === 0) return;
       
-      // Filter out tickers we already have in the map
-      const tickersToFetch = [...new Set(positions.map(p => p.ticker))]
-        .filter(t => !dividendMap[t]);
+      // Get unique tickers
+      const allTickers = [...new Set(positions.map(p => p.ticker.toUpperCase()))];
+      
+      // Only fetch tickers we don't have data for in the current session
+      const tickersToFetch = allTickers.filter(t => !dividendMap[t]);
 
       if (tickersToFetch.length === 0) return;
 
       setIsFetchingData(true);
+      
       try {
-        // Fetch all missing tickers in parallel for better performance
-        const results = await Promise.all(
-          tickersToFetch.map(ticker => getTickerFinancials(ticker))
-        );
+        // Fetch tickers sequentially or in small batches to avoid Yahoo rate limits
+        // Sequential is safer for reliability with multiple suffixes
+        for (const ticker of tickersToFetch) {
+          if (isCancelled) break;
+          
+          const data = await getTickerFinancials(ticker);
+          
+          if (isCancelled) break;
 
-        if (isCancelled) return;
-
-        setDividendMap(prev => {
-          const next = { ...prev };
-          results.forEach((data, index) => {
-            const ticker = tickersToFetch[index];
-            if (data && data.dividendHistory) {
-              next[ticker] = data.dividendHistory;
-            } else {
-              // Mark as empty array to avoid re-fetching failed ones in this session
-              next[ticker] = [];
-            }
-          });
-          return next;
-        });
+          setDividendMap(prev => ({
+            ...prev,
+            [ticker]: data?.dividendHistory || [],
+            // Also map the resolved symbol if it was different (e.g. YTSL -> YTSL.NE)
+            ...(data?.ticker && data.ticker !== ticker ? { [data.ticker]: data.dividendHistory || [] } : {})
+          }));
+        }
       } catch (error) {
-        console.error("Critical error in portfolio data fetch:", error);
+        console.error("Portfolio data fetch failed:", error);
       } finally {
         if (!isCancelled) {
           setIsFetchingData(false);
@@ -90,13 +88,14 @@ export function usePortfolio() {
 
   const addPosition = useCallback((newPos: Omit<PortfolioPosition, 'id'>) => {
     const id = Math.random().toString(36).substring(7);
-    const position: PortfolioPosition = { ...newPos, id };
+    const ticker = newPos.ticker.toUpperCase();
+    const position: PortfolioPosition = { ...newPos, ticker, id };
     
     setPositions(prev => [...prev, position]);
     
     const transaction: TransactionRecord = {
       id: `t_${Date.now()}`,
-      ticker: newPos.ticker,
+      ticker: ticker,
       type: 'buy',
       date: format(new Date(), 'yyyy-MM-dd'),
       shares: newPos.shares,
@@ -131,7 +130,8 @@ export function usePortfolio() {
   const getAllDividends = useCallback(() => {
     const allDivs: Array<DividendData & { totalAmount: number; sharesAtTime: number }> = [];
     positions.forEach(pos => {
-      const divs = dividendMap[pos.ticker] || [];
+      // Try both the original and resolved tickers in the map
+      const divs = dividendMap[pos.ticker.toUpperCase()] || [];
       divs.forEach(d => {
         allDivs.push({
           ...d,
@@ -140,12 +140,11 @@ export function usePortfolio() {
         });
       });
     });
-    // Sort by payout date descending (latest first)
     return allDivs.sort((a, b) => new Date(b.payoutDate).getTime() - new Date(a.payoutDate).getTime());
   }, [positions, dividendMap]);
 
   const getTickerData = useCallback((ticker: string) => {
-    return dividendMap[ticker] || [];
+    return dividendMap[ticker.toUpperCase()] || [];
   }, [dividendMap]);
 
   return {
