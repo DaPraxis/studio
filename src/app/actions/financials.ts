@@ -1,118 +1,96 @@
 'use server';
 
-import yahooFinance from 'yahoo-finance2';
 import { DividendData } from '@/lib/types';
-import { format, subYears } from 'date-fns';
 
 /**
- * Helper to wrap a promise with a timeout
+ * EODHD API Key provided by user
  */
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
-  let timeoutId: NodeJS.Timeout;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
-  });
+const API_KEY = '69bae56a2ef170.56740776';
 
-  return Promise.race([promise, timeoutPromise]).finally(() => {
-    clearTimeout(timeoutId!);
+/**
+ * Attempts to fetch data from EODHD with a timeout.
+ */
+async function fetchEODHD(endpoint: string, params: Record<string, string> = {}) {
+  const urlParams = new URLSearchParams({
+    api_token: API_KEY,
+    fmt: 'json',
+    ...params
   });
+  const url = `https://eodhd.com/api/${endpoint}?${urlParams.toString()}`;
+
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(id);
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (e) {
+    clearTimeout(id);
+    return null;
+  }
 }
 
 /**
- * Attempts to fetch data for a ticker, trying common Canadian suffixes if the primary fails.
+ * Resolves a ticker to the most likely EODHD format.
+ * EODHD requires {SYMBOL}.{EXCHANGE}
  */
-async function fetchWithFallbacks(ticker: string) {
-  const baseTicker = ticker.split('.')[0].toUpperCase();
-  // Variations to try for Canadian/Generic stocks in priority order
-  const variations = [
-    ticker.toUpperCase(),
-    `${baseTicker}.NE`, // Cboe Canada (formerly NEO)
-    `${baseTicker}.TO`, // Toronto Stock Exchange
-    `${baseTicker}.V`,  // TSX Venture
-  ];
-
-  // Remove duplicates and empty strings
-  const uniqueVariations = [...new Set(variations)].filter(v => v.length > 0);
-
-  for (const symbol of uniqueVariations) {
-    try {
-      // Very strict 4s timeout for the initial quote lookup
-      const quote = await withTimeout(
-        yahooFinance.quote(symbol),
-        4000,
-        `Timeout lookup for ${symbol}`
-      );
-      
-      if (quote && quote.regularMarketPrice !== undefined) {
-        return { symbol, quote };
-      }
-    } catch (e) {
-      continue;
-    }
-  }
-  return null;
+function resolveTicker(ticker: string): string {
+  const up = ticker.toUpperCase();
+  if (up.includes('.')) return up;
+  // Default common assumption for US stocks if no suffix
+  return `${up}.US`;
 }
 
 export async function getTickerFinancials(ticker: string) {
+  const symbol = resolveTicker(ticker);
+  
   try {
-    const result = await fetchWithFallbacks(ticker);
+    // 1. Fetch Real-time Price for yield calculation
+    const priceData = await fetchEODHD(`real-time/${symbol}`);
     
-    if (!result) {
-      return {
-        ticker,
-        price: 0,
-        currency: 'USD',
-        dividendYield: 'N/A',
-        dividendHistory: [],
-        error: 'Ticker not found'
-      };
+    // 2. Fetch Dividend History
+    // We fetch a broad history to map out the calendar
+    const divData = await fetchEODHD(`div/${symbol}`);
+
+    if (!divData || !Array.isArray(divData)) {
+      // If we failed with .US or provided suffix, try .TO as a fallback for Canadian potential
+      if (!ticker.includes('.')) {
+        const fallbackSymbol = `${ticker.toUpperCase()}.TO`;
+        const fallbackDiv = await fetchEODHD(`div/${fallbackSymbol}`);
+        if (fallbackDiv && Array.isArray(fallbackDiv)) {
+          return processResults(fallbackSymbol, fallbackDiv, await fetchEODHD(`real-time/${fallbackSymbol}`));
+        }
+      }
+      return null;
     }
 
-    const { symbol, quote } = result;
-    
-    // Fetch dividend events for the last 5 years
-    let dividends: any[] = [];
-    try {
-      const period1 = subYears(new Date(), 5);
-      // 5 second timeout for historical data
-      dividends = await withTimeout(
-        yahooFinance.historical(symbol, {
-          period1,
-          events: 'div',
-        }),
-        5000,
-        `Timeout history for ${symbol}`
-      ) || [];
-    } catch (e) {
-      // If historical fails, we still return the quote yield
-    }
-
-    const dividendHistory: DividendData[] = (dividends || [])
-      .filter((d: any) => d.dividends !== undefined)
-      .map((d: any) => ({
-        ticker: symbol,
-        exDate: format(new Date(d.date), 'yyyy-MM-dd'),
-        recordDate: format(new Date(d.date), 'yyyy-MM-dd'),
-        payoutDate: format(new Date(d.date), 'yyyy-MM-dd'),
-        amountPerShare: d.dividends,
-        yield: quote.trailingAnnualDividendYield ? quote.trailingAnnualDividendYield * 100 : undefined,
-      }))
-      .sort((a, b) => new Date(b.exDate).getTime() - new Date(a.exDate).getTime());
-
-    return {
-      ticker: symbol,
-      price: quote.regularMarketPrice || 0,
-      currency: quote.currency || 'USD',
-      dividendYield: quote.trailingAnnualDividendYield ? (quote.trailingAnnualDividendYield * 100).toFixed(2) : 'N/A',
-      dividendHistory: dividendHistory,
-    };
+    return processResults(symbol, divData, priceData);
   } catch (error) {
-    return {
-      ticker,
-      price: 0,
-      currency: 'USD',
-      dividendYield: 'N/A',
-      dividendHistory: []
-    };
+    console.error(`Error fetching ${symbol}:`, error);
+    return null;
   }
+}
+
+function processResults(symbol: string, divData: any[], priceData: any) {
+  const currentPrice = priceData?.close || 0;
+  
+  const history: DividendData[] = divData.map((d: any) => ({
+    ticker: symbol,
+    exDate: d.date,
+    recordDate: d.recordDate || d.date,
+    payoutDate: d.paymentDate || d.date,
+    amountPerShare: d.value,
+    yield: currentPrice > 0 ? (d.value * 4 / currentPrice) * 100 : undefined, // Annualized estimate
+  })).sort((a, b) => new Date(b.exDate).getTime() - new Date(a.exDate).getTime());
+
+  return {
+    ticker: symbol,
+    price: currentPrice,
+    currency: priceData?.currency || 'USD',
+    dividendYield: currentPrice > 0 && history.length > 0 ? (history[0].yield?.toFixed(2)) : 'N/A',
+    dividendHistory: history,
+    updatedAt: Date.now()
+  };
 }

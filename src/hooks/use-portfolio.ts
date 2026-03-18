@@ -6,19 +6,22 @@ import { INITIAL_POSITIONS, INITIAL_TRANSACTIONS } from '@/lib/mock-data';
 import { format } from 'date-fns';
 import { getTickerFinancials } from '@/app/actions/financials';
 
+// Cache data for 7 days to conserve API quota
+const CACHE_EXPIRY = 7 * 24 * 60 * 60 * 1000; 
+
 export function usePortfolio() {
   const [positions, setPositions] = useState<PortfolioPosition[]>([]);
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
-  const [dividendMap, setDividendMap] = useState<Record<string, DividendData[]>>({});
+  const [dividendMap, setDividendMap] = useState<Record<string, { data: DividendData[], updatedAt: number }>>({});
   const [isLoaded, setIsLoaded] = useState(false);
   const [isFetchingData, setIsFetchingData] = useState(false);
   const fetchInProgress = useRef(false);
-  const lastFetchAttempt = useRef<Record<string, number>>({});
 
   // Initial Load from LocalStorage
   useEffect(() => {
     const savedPositions = localStorage.getItem('dw_positions');
     const savedTransactions = localStorage.getItem('dw_transactions');
+    const savedDividends = localStorage.getItem('dw_dividend_cache');
     
     if (savedPositions && savedTransactions) {
       setPositions(JSON.parse(savedPositions));
@@ -27,10 +30,15 @@ export function usePortfolio() {
       setPositions(INITIAL_POSITIONS);
       setTransactions(INITIAL_TRANSACTIONS);
     }
+
+    if (savedDividends) {
+      setDividendMap(JSON.parse(savedDividends));
+    }
+
     setIsLoaded(true);
   }, []);
 
-  // Sync to LocalStorage
+  // Sync Positions/Transactions to LocalStorage
   useEffect(() => {
     if (isLoaded) {
       localStorage.setItem('dw_positions', JSON.stringify(positions));
@@ -38,7 +46,14 @@ export function usePortfolio() {
     }
   }, [positions, transactions, isLoaded]);
 
-  // Fetch Live Data for Tickers
+  // Sync Dividend Cache to LocalStorage
+  useEffect(() => {
+    if (isLoaded && Object.keys(dividendMap).length > 0) {
+      localStorage.setItem('dw_dividend_cache', JSON.stringify(dividendMap));
+    }
+  }, [dividendMap, isLoaded]);
+
+  // Fetch Live Data for Tickers (Optimized for EODHD 20/day limit)
   useEffect(() => {
     let isCancelled = false;
 
@@ -46,13 +61,13 @@ export function usePortfolio() {
       if (!isLoaded || positions.length === 0 || fetchInProgress.current) return;
       
       const allTickers = [...new Set(positions.map(p => p.ticker.toUpperCase()))];
-      
-      // Filter out tickers we already have OR have tried recently (last 2 mins)
       const now = Date.now();
+
+      // Only fetch if we don't have it OR it's older than CACHE_EXPIRY
       const tickersToFetch = allTickers.filter(t => {
-        const alreadyHasData = dividendMap[t] !== undefined;
-        const recentlyTried = lastFetchAttempt.current[t] && (now - lastFetchAttempt.current[t] < 120000);
-        return !alreadyHasData && !recentlyTried;
+        const cached = dividendMap[t];
+        const isStale = cached && (now - cached.updatedAt > CACHE_EXPIRY);
+        return !cached || isStale;
       });
 
       if (tickersToFetch.length === 0) return;
@@ -61,32 +76,35 @@ export function usePortfolio() {
       fetchInProgress.current = true;
       
       try {
-        // Fetch sequentially to avoid rate limits and ensure stability
         for (const ticker of tickersToFetch) {
           if (isCancelled) break;
           
-          lastFetchAttempt.current[ticker] = Date.now();
+          const result = await getTickerFinancials(ticker);
           
-          try {
-            const data = await getTickerFinancials(ticker);
-            
-            if (isCancelled) break;
+          if (isCancelled) break;
 
-            if (data) {
-              setDividendMap(prev => ({
-                ...prev,
-                [ticker]: data.dividendHistory || [],
-                // Also map the resolved ticker if it came back with a suffix (e.g. YSTL -> YSTL.NE)
-                ...(data.ticker && data.ticker !== ticker ? { [data.ticker]: data.dividendHistory || [] } : {})
-              }));
-            }
-          } catch (tickerError) {
-            // Silently mark as failed for this session to avoid infinite retries
-            setDividendMap(prev => ({ ...prev, [ticker]: [] }));
+          if (result) {
+            setDividendMap(prev => ({
+              ...prev,
+              [ticker]: { 
+                data: result.dividendHistory || [], 
+                updatedAt: Date.now() 
+              },
+              // If the ticker was resolved to a specific exchange (e.g. YSTL -> YSTL.NE), map that too
+              ...(result.ticker && result.ticker !== ticker ? { 
+                [result.ticker]: { data: result.dividendHistory || [], updatedAt: Date.now() } 
+              } : {})
+            }));
+          } else {
+            // Mark as empty but "updated" so we don't spam API retries for broken symbols
+            setDividendMap(prev => ({
+              ...prev,
+              [ticker]: { data: [], updatedAt: Date.now() }
+            }));
           }
         }
       } catch (error) {
-        // Global error handling
+        console.error("Batch fetch failed", error);
       } finally {
         if (!isCancelled) {
           setIsFetchingData(false);
@@ -148,8 +166,8 @@ export function usePortfolio() {
     const allDivs: Array<DividendData & { totalAmount: number; sharesAtTime: number }> = [];
     positions.forEach(pos => {
       const ticker = pos.ticker.toUpperCase();
-      // Try original ticker or suffix-resolved ticker
-      const divs = dividendMap[ticker] || [];
+      const cached = dividendMap[ticker];
+      const divs = cached?.data || [];
       
       divs.forEach(d => {
         allDivs.push({
@@ -163,7 +181,7 @@ export function usePortfolio() {
   }, [positions, dividendMap]);
 
   const getTickerData = useCallback((ticker: string) => {
-    return dividendMap[ticker.toUpperCase()] || [];
+    return dividendMap[ticker.toUpperCase()]?.data || [];
   }, [dividendMap]);
 
   return {
