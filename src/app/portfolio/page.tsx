@@ -1,4 +1,3 @@
-
 "use client"
 
 import { usePortfolio } from "@/hooks/use-portfolio";
@@ -6,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, TrendingUp, DollarSign, Award, ArrowUpRight } from "lucide-react";
-import { startOfMonth, endOfMonth, parseISO, startOfDay, isAfter, isSameDay } from "date-fns";
+import { startOfMonth, endOfMonth, parseISO, startOfDay, isAfter, isSameDay, format } from "date-fns";
 import { useState, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 
@@ -78,7 +77,6 @@ export default function Portfolio() {
 
   const positionDisplayData = useMemo(() => {
     return positions.map(pos => {
-      // Find the first upcoming ex-dividend event for this ticker
       const nextEvent = allDivs.find(d => 
         d.ticker === pos.ticker && 
         (isAfter(parseISO(d.exDate), now) || isSameDay(parseISO(d.exDate), now))
@@ -179,7 +177,7 @@ export default function Portfolio() {
                   <TableCell className="font-bold text-primary">{pos.ticker}</TableCell>
                   <TableCell className="font-medium">{pos.shares}</TableCell>
                   <TableCell className="font-semibold">${Number(pos.totalCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
-                  <TableCell>{pos.displayExDate}</TableCell>
+                  <TableCell>{format(parseISO(pos.displayExDate), 'MMM dd, yyyy')}</TableCell>
                   <TableCell className="text-accent font-bold">${Number(pos.displayDivAmount || 0).toFixed(3)}</TableCell>
                   <TableCell>
                     <Badge 

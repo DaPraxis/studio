@@ -5,7 +5,7 @@ import { usePortfolio } from "@/hooks/use-portfolio";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { History, ArrowUpRight, ArrowDownRight, Gift, Trash2, Plus, Download, Upload, FileJson, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -38,11 +38,10 @@ export default function HistoryPage() {
     nextExDate: format(new Date(), 'yyyy-MM-dd')
   });
 
-  // Automatically detect if stock exists and set default switch state
   useEffect(() => {
     const existing = positions.find(p => p.ticker === formData.ticker.toUpperCase());
     if (existing) {
-      setUpdateDivInfo(false); // Default to FALSE for existing stocks
+      setUpdateDivInfo(false);
       setFormData(prev => ({
         ...prev,
         dividendAmount: existing.dividendAmount,
@@ -50,7 +49,7 @@ export default function HistoryPage() {
         nextExDate: existing.nextExDate
       }));
     } else {
-      setUpdateDivInfo(true); // Default to TRUE for new stocks
+      setUpdateDivInfo(true);
     }
   }, [formData.ticker, positions]);
 
@@ -73,7 +72,6 @@ export default function HistoryPage() {
       shares: Number(formData.shares),
       price: Number(formData.price),
       totalAmount: Number(finalTotal),
-      // Only include dividend data if it's a new stock or user explicitly wants to update schedule
       dividendAmount: (formData.type === 'dividend' || (formData.type === 'buy' && updateDivInfo)) ? Number(formData.dividendAmount) : undefined,
       frequency: (formData.type === 'buy' && updateDivInfo) ? formData.frequency : undefined,
       nextExDate: (formData.type === 'dividend' || (formData.type === 'buy' && updateDivInfo)) ? formData.nextExDate : undefined
@@ -94,7 +92,6 @@ export default function HistoryPage() {
   };
 
   const exportToJSON = () => {
-    // This includes BOTH transactions AND manual calendar adjustments
     const data = { transactions, manualAdjustments };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -102,7 +99,7 @@ export default function HistoryPage() {
     link.href = url;
     link.download = `dividendwise_backup_${format(new Date(), 'yyyyMMdd')}.json`;
     link.click();
-    toast({ title: "Exported JSON", description: "Full database backup saved (includes all adjustments)." });
+    toast({ title: "Exported JSON", description: "Full database backup saved." });
   };
 
   const exportToCSV = () => {
@@ -131,9 +128,8 @@ export default function HistoryPage() {
         if (importType === 'json') {
           const data = JSON.parse(text);
           importData(data);
-          toast({ title: "Import Successful", description: "Portfolio and manual adjustments restored." });
+          toast({ title: "Import Successful", description: "Portfolio and settings restored." });
         } else {
-          // CSV Import (Transactions Only)
           const lines = text.split("\n");
           const headers = lines[0].split(",");
           lines.slice(1).forEach(line => {
@@ -167,7 +163,7 @@ export default function HistoryPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-primary">Activity History</h1>
-          <p className="text-muted-foreground">Manage your transactions. Use JSON Export for a full backup of all settings.</p>
+          <p className="text-muted-foreground">Manage your transactions. Use JSON Export for a full backup.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -223,7 +219,7 @@ export default function HistoryPage() {
             <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Log Transaction</DialogTitle>
-                <DialogDescription>Add buys, sells, or actual dividend payouts to your history.</DialogDescription>
+                <DialogDescription>Add buys, sells, or actual dividend payouts.</DialogDescription>
               </DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -384,7 +380,9 @@ export default function HistoryPage() {
             <TableBody>
               {transactions.slice().reverse().map((t) => (
                 <TableRow key={t.id}>
-                  <TableCell className="text-muted-foreground font-medium">{format(new Date(t.date), 'MMM dd, yyyy')}</TableCell>
+                  <TableCell className="text-muted-foreground font-medium">
+                    {format(parseISO(t.date), 'MMM dd, yyyy')}
+                  </TableCell>
                   <TableCell className="font-bold text-primary">{t.ticker}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">

@@ -1,11 +1,10 @@
-
 "use client"
 
 import { usePortfolio } from "@/hooks/use-portfolio";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DollarSign, PieChart, Calendar as CalendarIcon, ArrowUpRight, TrendingUp } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { format, isAfter, startOfDay } from "date-fns";
+import { format, isAfter, startOfDay, parseISO } from "date-fns";
 import { useState, useEffect } from "react";
 
 export default function Dashboard() {
@@ -33,7 +32,7 @@ export default function Dashboard() {
 
   const allDivs = getAllDividends();
   
-  const upcomingDivs = allDivs.filter(d => isAfter(startOfDay(new Date(d.payoutDate)), now));
+  const upcomingDivs = allDivs.filter(d => isAfter(startOfDay(parseISO(d.payoutDate)), now));
   const totalUpcomingPayout = upcomingDivs.reduce((acc, d) => acc + (Number(d.totalAmount) || 0), 0);
   
   const totalPortfolioCost = positions.reduce((acc, p) => acc + (Number(p.totalCost) || 0), 0);
@@ -120,7 +119,7 @@ export default function Dashboard() {
                     </div>
                     <div>
                       <div className="font-semibold">{div.ticker}</div>
-                      <div className="text-xs text-muted-foreground">Payout: {format(new Date(div.payoutDate), 'MMM dd, yyyy')}</div>
+                      <div className="text-xs text-muted-foreground">Payout: {format(parseISO(div.payoutDate), 'MMM dd, yyyy')}</div>
                     </div>
                   </div>
                   <div className="text-right">
@@ -147,7 +146,7 @@ export default function Dashboard() {
               {upcomingDivs.length > 0 ? (
                 <div className="space-y-2">
                   <div className="text-3xl font-bold text-accent">
-                    {format(new Date(upcomingDivs[0].payoutDate), 'MMM dd')}
+                    {format(parseISO(upcomingDivs[0].payoutDate), 'MMM dd')}
                   </div>
                   <p className="text-sm text-muted-foreground">
                     Your next dividend payout from <strong>{upcomingDivs[0].ticker}</strong> is arriving soon.
