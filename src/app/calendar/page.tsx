@@ -4,16 +4,17 @@
 import { useState, useMemo } from 'react';
 import { usePortfolio } from "@/hooks/use-portfolio";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, parseISO } from 'date-fns';
-import { ChevronLeft, ChevronRight, Edit3 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Edit3, ArrowUpRight, ArrowDownRight, Gift } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 export default function DividendCalendar() {
-  const { getAllDividends, positions, updateManualAdjustment, isLoaded } = usePortfolio();
+  const { getAllDividends, positions, transactions, updateManualAdjustment, isLoaded } = usePortfolio();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [editingDividend, setEditingDividend] = useState<any>(null);
@@ -29,9 +30,15 @@ export default function DividendCalendar() {
   const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
 
   const getEventsForDay = (date: Date) => {
-    return allDivs.filter(div => 
+    const divs = allDivs.filter(div => 
       isSameDay(parseISO(div.payoutDate), date) || isSameDay(parseISO(div.exDate), date)
-    );
+    ).map(d => ({ ...d, calendarType: 'dividend' as const }));
+
+    const txs = transactions.filter(tx => 
+      tx.type !== 'dividend' && isSameDay(parseISO(tx.date), date)
+    ).map(t => ({ ...t, calendarType: 'transaction' as const }));
+
+    return [...divs, ...txs];
   };
 
   const handleUpdate = () => {
@@ -53,8 +60,8 @@ export default function DividendCalendar() {
     <div className="p-4 md:p-8 max-w-7xl mx-auto w-full space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-primary">Dividend Calendar</h1>
-          <p className="text-muted-foreground">Track ex-dividend and payout dates across your portfolio.</p>
+          <h1 className="text-3xl font-bold text-primary">Portfolio Calendar</h1>
+          <p className="text-muted-foreground">Track dividends, buys, and sells chronologically.</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="icon" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}>
@@ -87,7 +94,7 @@ export default function DividendCalendar() {
             <div 
               key={i} 
               className={cn(
-                "h-24 md:h-32 border rounded-xl p-2 bg-white transition-all cursor-pointer hover:shadow-md",
+                "h-24 md:h-32 border rounded-xl p-2 bg-white transition-all cursor-pointer hover:shadow-md overflow-hidden",
                 isSameDay(day, new Date()) ? "border-accent ring-1 ring-accent" : "border-muted"
               )}
               onClick={() => setSelectedDay(day)}
@@ -95,17 +102,40 @@ export default function DividendCalendar() {
               <div className="text-right text-sm font-medium text-muted-foreground">{format(day, 'd')}</div>
               <div className="mt-1 space-y-1">
                 {events.slice(0, 3).map((ev, idx) => {
+                  if (ev.calendarType === 'transaction') {
+                    return (
+                      <TooltipProvider key={idx}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div 
+                              className={cn(
+                                "text-[10px] px-1.5 py-0.5 rounded truncate font-medium text-white",
+                                ev.type === 'buy' ? "bg-green-600" : "bg-red-600"
+                              )}
+                            >
+                              {ev.type === 'buy' ? 'B' : 'S'}: {ev.ticker}
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <div className="text-xs">
+                              <span className="font-bold">{ev.type === 'buy' ? 'Bought' : 'Sold'}</span> {ev.shares} shares @ ${ev.price.toFixed(2)}
+                            </div>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    );
+                  }
+
                   const isPayout = isSameDay(parseISO(ev.payoutDate), day);
                   return (
                     <div 
                       key={idx} 
                       className={cn(
-                        "text-[10px] md:text-xs px-1.5 py-0.5 rounded truncate font-medium flex items-center justify-between",
+                        "text-[10px] px-1.5 py-0.5 rounded truncate font-medium flex items-center justify-between",
                         isPayout ? "bg-primary text-white" : "bg-accent/20 text-accent"
                       )}
                     >
                       <span className="truncate">{ev.ticker} {isPayout ? `$${ev.totalAmount.toFixed(0)}` : 'Ex'}</span>
-                      {ev.status === 'edited' && <div className="w-1.5 h-1.5 rounded-full bg-accent shrink-0 ml-1" />}
                     </div>
                   );
                 })}
@@ -122,19 +152,44 @@ export default function DividendCalendar() {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{selectedDay && format(selectedDay, 'MMMM do, yyyy')}</DialogTitle>
-            <DialogDescription>Scheduled events for this day.</DialogDescription>
+            <DialogDescription>Activity and events for this date.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             {selectedDay && getEventsForDay(selectedDay).map((ev, i) => {
+              if (ev.calendarType === 'transaction') {
+                return (
+                  <div key={i} className="flex items-center justify-between p-4 border rounded-xl bg-muted/10">
+                    <div className="flex items-center gap-3">
+                      <div className={cn(
+                        "h-10 w-10 rounded-full flex items-center justify-center text-white",
+                        ev.type === 'buy' ? "bg-green-600" : "bg-red-600"
+                      )}>
+                        {ev.type === 'buy' ? <ArrowUpRight className="h-5 w-5" /> : <ArrowDownRight className="h-5 w-5" />}
+                      </div>
+                      <div>
+                        <div className="font-bold text-lg">{ev.ticker}</div>
+                        <Badge variant="outline" className="capitalize">
+                          {ev.type}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-bold">${ev.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                      <div className="text-xs text-muted-foreground">{ev.shares} Shares @ ${ev.price.toFixed(2)}</div>
+                    </div>
+                  </div>
+                );
+              }
+
               const isPayout = isSameDay(parseISO(ev.payoutDate), selectedDay);
               const isExDate = isSameDay(parseISO(ev.exDate), selectedDay);
               
               return (
-                <div key={i} className="flex flex-col gap-3 p-4 border rounded-xl bg-muted/20 relative group">
+                <div key={i} className="flex flex-col gap-3 p-4 border rounded-xl bg-primary/5 relative group">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className="h-10 w-10 rounded-full bg-primary flex items-center justify-center text-white font-bold">
-                        {ev.ticker[0]}
+                        <Gift className="h-5 w-5" />
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
