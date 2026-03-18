@@ -1,0 +1,8 @@
+{
+  "requiredResources": [
+    {
+      "type": "firestore",
+      "id": "default"
+    }
+  ]
+}
