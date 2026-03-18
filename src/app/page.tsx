@@ -5,11 +5,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DollarSign, PieChart, Calendar as CalendarIcon, ArrowUpRight, TrendingUp } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format, isAfter } from "date-fns";
+import { useState, useEffect } from "react";
 
 export default function Dashboard() {
   const { positions, getAllDividends, isLoaded } = usePortfolio();
+  const [mounted, setMounted] = useState(false);
+  const [now, setNow] = useState<Date>(new Date());
 
-  if (!isLoaded) {
+  useEffect(() => {
+    setMounted(true);
+    setNow(new Date());
+  }, []);
+
+  if (!isLoaded || !mounted) {
     return (
       <div className="p-8 space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -23,7 +31,6 @@ export default function Dashboard() {
   }
 
   const allDivs = getAllDividends();
-  const now = new Date();
   
   const upcomingDivs = allDivs.filter(d => isAfter(new Date(d.payoutDate), now));
   const totalUpcomingPayout = upcomingDivs.reduce((acc, d) => acc + (Number(d.totalAmount) || 0), 0);

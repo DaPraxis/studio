@@ -1,4 +1,3 @@
-
 "use client"
 
 import { usePortfolio } from "@/hooks/use-portfolio";
@@ -7,40 +6,70 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Loader2, TrendingUp, DollarSign, Award, ArrowUpRight } from "lucide-react";
 import { startOfMonth, endOfMonth, parseISO } from "date-fns";
+import { useState, useEffect, useMemo } from "react";
 
 export default function Portfolio() {
   const { positions, getAllDividends, isLoaded } = usePortfolio();
+  const [mounted, setMounted] = useState(false);
+  const [now, setNow] = useState<Date>(new Date());
 
-  if (!isLoaded) return <div className="p-8 flex items-center gap-2"><Loader2 className="animate-spin" /> Loading Portfolio...</div>;
+  useEffect(() => {
+    setMounted(true);
+    setNow(new Date());
+  }, []);
 
-  const allDivs = getAllDividends();
-  const now = new Date();
-  const monthStart = startOfMonth(now);
-  const monthEnd = endOfMonth(now);
+  const metrics = useMemo(() => {
+    if (!isLoaded || !mounted) return {
+      thisMonthReceived: 0,
+      thisMonthTotal: 0,
+      annualIncome: 0,
+      totalCost: 0,
+      avgYield: 0,
+      topContributor: null
+    };
 
-  const thisMonthIncome = allDivs
-    .filter(d => {
+    const allDivs = getAllDividends();
+    const monthStart = startOfMonth(now);
+    const monthEnd = endOfMonth(now);
+
+    const monthDivs = allDivs.filter(d => {
       const pDate = parseISO(d.payoutDate);
       return pDate >= monthStart && pDate <= monthEnd;
-    })
-    .reduce((acc, d) => acc + (Number(d.totalAmount) || 0), 0);
+    });
 
-  const totalCost = positions.reduce((acc, p) => acc + (Number(p.totalCost) || 0), 0);
-  
-  const annualIncome = positions.reduce((acc, p) => {
-    const multi = p.frequency === 'monthly' ? 12 : p.frequency === 'quarterly' ? 4 : p.frequency === 'semi-monthly' ? 24 : 1;
-    return acc + (p.shares * p.dividendAmount * multi);
-  }, 0);
+    const total = monthDivs.reduce((acc, d) => acc + (Number(d.totalAmount) || 0), 0);
+    const received = monthDivs
+      .filter(d => d.index === -1) // index -1 indicates an actual dividend transaction recorded in history
+      .reduce((acc, d) => acc + (Number(d.totalAmount) || 0), 0);
 
-  const avgYield = totalCost > 0 ? (annualIncome / totalCost) * 100 : 0;
+    const cost = positions.reduce((acc, p) => acc + (Number(p.totalCost) || 0), 0);
+    
+    const income = positions.reduce((acc, p) => {
+      const multi = p.frequency === 'monthly' ? 12 : p.frequency === 'quarterly' ? 4 : p.frequency === 'semi-monthly' ? 24 : 1;
+      return acc + (p.shares * p.dividendAmount * multi);
+    }, 0);
 
-  const topContributor = positions.length > 0 ? positions.reduce((prev, current) => {
-    const getAnnual = (pos: typeof positions[0]) => {
-      const m = pos.frequency === 'monthly' ? 12 : pos.frequency === 'quarterly' ? 4 : pos.frequency === 'semi-monthly' ? 24 : 1;
-      return pos.shares * pos.dividendAmount * m;
+    const yieldVal = cost > 0 ? (income / cost) * 100 : 0;
+
+    const top = positions.length > 0 ? positions.reduce((prev, current) => {
+      const getAnnual = (pos: typeof positions[0]) => {
+        const m = pos.frequency === 'monthly' ? 12 : pos.frequency === 'quarterly' ? 4 : pos.frequency === 'semi-monthly' ? 24 : 1;
+        return pos.shares * pos.dividendAmount * m;
+      };
+      return getAnnual(prev) > getAnnual(current) ? prev : current;
+    }, positions[0]) : null;
+
+    return {
+      thisMonthReceived: received,
+      thisMonthTotal: total,
+      annualIncome: income,
+      totalCost: cost,
+      avgYield: yieldVal,
+      topContributor: top
     };
-    return getAnnual(prev) > getAnnual(current) ? prev : current;
-  }, positions[0]) : null;
+  }, [positions, getAllDividends, isLoaded, now, mounted]);
+
+  if (!isLoaded || !mounted) return <div className="p-8 flex items-center gap-2"><Loader2 className="animate-spin" /> Loading Portfolio...</div>;
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto w-full space-y-6">
@@ -56,14 +85,15 @@ export default function Portfolio() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <DollarSign className="h-4 w-4 text-primary" />
-              Expected (Current Month)
+              Received / Expected (This Month)
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              ${thisMonthIncome.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            <div className="text-2xl font-bold flex items-baseline gap-1 flex-wrap">
+              <span>${metrics.thisMonthReceived.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span className="text-muted-foreground font-normal text-lg">/ ${metrics.thisMonthTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
-            <p className="text-xs text-muted-foreground mt-1">Cash arriving this month</p>
+            <p className="text-xs text-muted-foreground mt-1">Logged payouts vs. month schedule</p>
           </CardContent>
         </Card>
         
@@ -76,7 +106,7 @@ export default function Portfolio() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-accent">
-              {avgYield.toFixed(2)}%
+              {metrics.avgYield.toFixed(2)}%
             </div>
             <p className="text-xs text-muted-foreground mt-1">Weighted by invested capital</p>
           </CardContent>
@@ -91,10 +121,10 @@ export default function Portfolio() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {topContributor ? topContributor.ticker : "---"}
+              {metrics.topContributor ? metrics.topContributor.ticker : "---"}
             </div>
             <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-              {topContributor ? (
+              {metrics.topContributor ? (
                 <>
                   <ArrowUpRight className="h-3 w-3 text-green-500" />
                   Highest annual contributor
