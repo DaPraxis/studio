@@ -39,14 +39,16 @@ export default function Portfolio() {
 
     const total = monthDivs.reduce((acc, d) => acc + (Number(d.totalAmount) || 0), 0);
     const received = monthDivs
-      .filter(d => d.index === -1) // index -1 indicates an actual dividend transaction recorded in history
+      .filter(d => d.index === -1) 
       .reduce((acc, d) => acc + (Number(d.totalAmount) || 0), 0);
 
     const cost = positions.reduce((acc, p) => acc + (Number(p.totalCost) || 0), 0);
     
     const income = positions.reduce((acc, p) => {
       const multi = p.frequency === 'monthly' ? 12 : p.frequency === 'quarterly' ? 4 : p.frequency === 'semi-monthly' ? 24 : 1;
-      return acc + (p.shares * p.dividendAmount * multi);
+      const amount = Number(p.dividendAmount) || 0;
+      const shares = Number(p.shares) || 0;
+      return acc + (shares * amount * multi);
     }, 0);
 
     const yieldVal = cost > 0 ? (income / cost) * 100 : 0;
@@ -54,7 +56,9 @@ export default function Portfolio() {
     const top = positions.length > 0 ? positions.reduce((prev, current) => {
       const getAnnual = (pos: typeof positions[0]) => {
         const m = pos.frequency === 'monthly' ? 12 : pos.frequency === 'quarterly' ? 4 : pos.frequency === 'semi-monthly' ? 24 : 1;
-        return pos.shares * pos.dividendAmount * m;
+        const amt = Number(pos.dividendAmount) || 0;
+        const sh = Number(pos.shares) || 0;
+        return sh * amt * m;
       };
       return getAnnual(prev) > getAnnual(current) ? prev : current;
     }, positions[0]) : null;
@@ -90,8 +94,8 @@ export default function Portfolio() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold flex items-baseline gap-1 flex-wrap">
-              <span>${metrics.thisMonthReceived.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              <span className="text-muted-foreground font-normal text-lg">/ ${metrics.thisMonthTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span>${Number(metrics.thisMonthReceived || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span className="text-muted-foreground font-normal text-lg">/ ${Number(metrics.thisMonthTotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
             <p className="text-xs text-muted-foreground mt-1">Logged payouts vs. month schedule</p>
           </CardContent>
@@ -106,7 +110,7 @@ export default function Portfolio() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-accent">
-              {metrics.avgYield.toFixed(2)}%
+              {Number(metrics.avgYield || 0).toFixed(2)}%
             </div>
             <p className="text-xs text-muted-foreground mt-1">Weighted by invested capital</p>
           </CardContent>
@@ -154,9 +158,9 @@ export default function Portfolio() {
                 <TableRow key={pos.ticker}>
                   <TableCell className="font-bold text-primary">{pos.ticker}</TableCell>
                   <TableCell className="font-medium">{pos.shares}</TableCell>
-                  <TableCell>${pos.averagePrice.toFixed(2)}</TableCell>
-                  <TableCell className="font-semibold">${pos.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
-                  <TableCell className="text-accent font-bold">${pos.dividendAmount.toFixed(3)}</TableCell>
+                  <TableCell>${Number(pos.averagePrice || 0).toFixed(2)}</TableCell>
+                  <TableCell className="font-semibold">${Number(pos.totalCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
+                  <TableCell className="text-accent font-bold">${Number(pos.dividendAmount || 0).toFixed(3)}</TableCell>
                   <TableCell>{pos.nextExDate}</TableCell>
                   <TableCell>
                     <Badge variant="secondary" className="capitalize">{pos.frequency.replace('-', ' ')}</Badge>
