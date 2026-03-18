@@ -4,17 +4,21 @@ import { useState, useMemo } from 'react';
 import { usePortfolio } from "@/hooks/use-portfolio";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isSameMonth } from 'date-fns';
-import { ChevronLeft, ChevronRight, Info } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Info, Calendar as CalendarIcon, Edit3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { AIDividendExplainer } from '@/components/ai-dividend-explainer';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 export default function DividendCalendar() {
-  const { getAllDividends, isLoaded } = usePortfolio();
+  const { getAllDividends, positions, updatePosition, isLoaded } = usePortfolio();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
+  const [editingDividend, setEditingDividend] = useState<any>(null);
+  const [newDate, setNewDate] = useState("");
 
   const allDivs = useMemo(() => getAllDividends(), [getAllDividends]);
 
@@ -26,6 +30,20 @@ export default function DividendCalendar() {
     return allDivs.filter(div => 
       isSameDay(new Date(div.payoutDate), date) || isSameDay(new Date(div.exDate), date)
     );
+  };
+
+  const handleUpdateDate = () => {
+    if (!editingDividend || !newDate) return;
+    
+    const pos = positions.find(p => p.ticker === editingDividend.ticker);
+    if (pos) {
+      updatePosition(pos.id, {
+        nextExDate: newDate,
+        isManualDate: true
+      });
+    }
+    setEditingDividend(null);
+    setNewDate("");
   };
 
   if (!isLoaded) return <div className="p-8">Loading...</div>;
@@ -57,14 +75,12 @@ export default function DividendCalendar() {
           </div>
         ))}
         
-        {/* Fill empty slots for start of month */}
         {[...Array(monthStart.getDay())].map((_, i) => (
           <div key={`empty-${i}`} className="h-24 md:h-32 border border-transparent" />
         ))}
 
         {days.map((day, i) => {
           const events = getEventsForDay(day);
-          const hasEvents = events.length > 0;
           
           return (
             <div 
@@ -83,11 +99,12 @@ export default function DividendCalendar() {
                     <div 
                       key={idx} 
                       className={cn(
-                        "text-[10px] md:text-xs px-1.5 py-0.5 rounded truncate font-medium",
+                        "text-[10px] md:text-xs px-1.5 py-0.5 rounded truncate font-medium flex items-center justify-between",
                         isPayout ? "bg-primary text-white" : "bg-accent/20 text-accent"
                       )}
                     >
-                      {ev.ticker} {isPayout ? `$${ev.totalAmount.toFixed(0)}` : 'Ex'}
+                      <span>{ev.ticker} {isPayout ? `$${ev.totalAmount.toFixed(0)}` : 'Ex'}</span>
+                      {ev.isManual && !isPayout && <span className="w-1 h-1 rounded-full bg-accent ml-1" />}
                     </div>
                   );
                 })}
@@ -101,7 +118,7 @@ export default function DividendCalendar() {
       </div>
 
       <Dialog open={!!selectedDay} onOpenChange={() => setSelectedDay(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{selectedDay && format(selectedDay, 'MMMM do, yyyy')}</DialogTitle>
             <DialogDescription>Scheduled events for this day.</DialogDescription>
@@ -109,18 +126,40 @@ export default function DividendCalendar() {
           <div className="space-y-4 py-4">
             {selectedDay && getEventsForDay(selectedDay).map((ev, i) => {
               const isPayout = isSameDay(new Date(ev.payoutDate), selectedDay);
+              const isExDate = isSameDay(new Date(ev.exDate), selectedDay);
+              
               return (
-                <div key={i} className="flex flex-col gap-3 p-4 border rounded-xl bg-muted/20">
+                <div key={i} className="flex flex-col gap-3 p-4 border rounded-xl bg-muted/20 relative group">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className="h-10 w-10 rounded-full bg-primary flex items-center justify-center text-white font-bold">
                         {ev.ticker[0]}
                       </div>
                       <div>
-                        <div className="font-bold text-lg">{ev.ticker}</div>
-                        <Badge variant={isPayout ? "default" : "secondary"}>
-                          {isPayout ? "Payout Date" : "Ex-Dividend Date"}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <div className="font-bold text-lg">{ev.ticker}</div>
+                          <Badge variant={ev.isManual ? "outline" : "secondary"} className="text-[10px] px-1.5 h-4">
+                            {ev.isManual ? "Manual" : "Projected"}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={isPayout ? "default" : "secondary"}>
+                            {isPayout ? "Payout Date" : "Ex-Dividend Date"}
+                          </Badge>
+                          {isExDate && (
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={() => {
+                                setEditingDividend(ev);
+                                setNewDate(ev.exDate);
+                              }}
+                            >
+                              <Edit3 className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <div className="text-right">
@@ -144,6 +183,27 @@ export default function DividendCalendar() {
               <div className="text-center py-10 text-muted-foreground italic">No events scheduled for this date.</div>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingDividend} onOpenChange={() => setEditingDividend(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Adjust Ex-Dividend Date</DialogTitle>
+            <DialogDescription>
+              Changing this will auto-shift all future projected dates for {editingDividend?.ticker}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Actual Ex-Dividend Date</Label>
+              <Input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingDividend(null)}>Cancel</Button>
+            <Button onClick={handleUpdateDate}>Update & Shift Projections</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

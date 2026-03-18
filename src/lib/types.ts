@@ -11,6 +11,7 @@ export interface PortfolioPosition {
   dividendAmount: number; // Per share
   frequency: DividendFrequency;
   nextExDate: string; // YYYY-MM-DD
+  isManualDate?: boolean; // Whether the nextExDate was explicitly set by user
 }
 
 export interface DividendData {
@@ -20,6 +21,7 @@ export interface DividendData {
   payoutDate: string;
   amountPerShare: number;
   yield?: number;
+  isManual?: boolean;
 }
 
 export interface TransactionRecord {

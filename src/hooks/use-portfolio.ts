@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { PortfolioPosition, TransactionRecord, DividendData } from '@/lib/types';
 import { INITIAL_POSITIONS, INITIAL_TRANSACTIONS } from '@/lib/mock-data';
-import { format, addMonths, addDays } from 'date-fns';
+import { format, addMonths, addDays, isSameDay } from 'date-fns';
 
 export function usePortfolio() {
   const [positions, setPositions] = useState<PortfolioPosition[]>([]);
@@ -11,8 +11,8 @@ export function usePortfolio() {
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    const savedPositions = localStorage.getItem('dw_positions_v2');
-    const savedTransactions = localStorage.getItem('dw_transactions_v2');
+    const savedPositions = localStorage.getItem('dw_positions_v3');
+    const savedTransactions = localStorage.getItem('dw_transactions_v3');
     
     if (savedPositions && savedTransactions) {
       setPositions(JSON.parse(savedPositions));
@@ -27,8 +27,8 @@ export function usePortfolio() {
 
   useEffect(() => {
     if (isLoaded) {
-      localStorage.setItem('dw_positions_v2', JSON.stringify(positions));
-      localStorage.setItem('dw_transactions_v2', JSON.stringify(transactions));
+      localStorage.setItem('dw_positions_v3', JSON.stringify(positions));
+      localStorage.setItem('dw_transactions_v3', JSON.stringify(transactions));
     }
   }, [positions, transactions, isLoaded]);
 
@@ -109,6 +109,9 @@ export function usePortfolio() {
         }
         
         const payoutDate = addDays(exDate, 10);
+        
+        // Mark the first one as manual if the position itself says so
+        const isManual = i === 0 && pos.isManualDate;
 
         allDivs.push({
           ticker: pos.ticker,
@@ -118,7 +121,8 @@ export function usePortfolio() {
           amountPerShare: pos.dividendAmount,
           yield: pos.purchasePrice > 0 ? (pos.dividendAmount * (iterations) / pos.purchasePrice) * 100 : 0,
           totalAmount: pos.shares * pos.dividendAmount,
-          sharesAtTime: pos.shares
+          sharesAtTime: pos.shares,
+          isManual: isManual
         });
       }
     });
