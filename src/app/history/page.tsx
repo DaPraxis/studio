@@ -1,14 +1,15 @@
 "use client"
 
 import { usePortfolio } from "@/hooks/use-portfolio";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { format } from 'date-fns';
-import { History, ArrowUpRight, ArrowDownRight, Gift } from "lucide-react";
+import { History, ArrowUpRight, ArrowDownRight, Gift, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export default function HistoryPage() {
-  const { transactions, isLoaded } = usePortfolio();
+  const { transactions, deleteTransaction, isLoaded } = usePortfolio();
 
   if (!isLoaded) return <div className="p-8 text-center">Loading...</div>;
 
@@ -31,6 +32,7 @@ export default function HistoryPage() {
                 <TableHead className="font-bold">Type</TableHead>
                 <TableHead className="font-bold">Shares</TableHead>
                 <TableHead className="font-bold text-right">Total Amount</TableHead>
+                <TableHead className="font-bold text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -63,11 +65,21 @@ export default function HistoryPage() {
                   )}>
                     {t.type === 'dividend' ? `+` : ``}${t.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </TableCell>
+                  <TableCell className="text-right">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                      onClick={() => deleteTransaction(t.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
               {transactions.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-20 text-muted-foreground italic">
+                  <TableCell colSpan={6} className="text-center py-20 text-muted-foreground italic">
                     <History className="h-12 w-12 mx-auto mb-4 opacity-20" />
                     No transactions found.
                   </TableCell>

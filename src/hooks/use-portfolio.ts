@@ -73,6 +73,10 @@ export function usePortfolio() {
     setTransactions(prev => [transaction, ...prev]);
   }, [positions]);
 
+  const deleteTransaction = useCallback((id: string) => {
+    setTransactions(prev => prev.filter(t => t.id !== id));
+  }, []);
+
   const getAllDividends = useCallback(() => {
     const allDivs: Array<DividendData & { totalAmount: number; sharesAtTime: number }> = [];
     
@@ -93,7 +97,7 @@ export function usePortfolio() {
         monthsToAdd = 12;
       } else if (pos.frequency === 'semi-monthly') {
         iterations = 24;
-        daysToAdd = 15; // Rough estimate for semi-monthly projection
+        daysToAdd = 15;
       }
 
       for (let i = 0; i < iterations; i++) {
@@ -128,6 +132,7 @@ export function usePortfolio() {
     addPosition,
     updatePosition,
     deletePosition,
+    deleteTransaction,
     getAllDividends,
     isLoaded
   };
