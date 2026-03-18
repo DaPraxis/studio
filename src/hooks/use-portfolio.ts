@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { PortfolioPosition, TransactionRecord, DividendData, DividendFrequency } from '@/lib/types';
 import { INITIAL_POSITIONS, INITIAL_TRANSACTIONS } from '@/lib/mock-data';
-import { format, addMonths, addDays, isSameDay } from 'date-fns';
+import { format, addMonths, addDays } from 'date-fns';
 
 export function usePortfolio() {
   const [positions, setPositions] = useState<PortfolioPosition[]>([]);
@@ -11,8 +11,8 @@ export function usePortfolio() {
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    const savedPositions = localStorage.getItem('dw_positions_v5');
-    const savedTransactions = localStorage.getItem('dw_transactions_v5');
+    const savedPositions = localStorage.getItem('dw_positions_v6');
+    const savedTransactions = localStorage.getItem('dw_transactions_v6');
     
     if (savedPositions && savedTransactions) {
       setPositions(JSON.parse(savedPositions));
@@ -27,8 +27,8 @@ export function usePortfolio() {
 
   useEffect(() => {
     if (isLoaded) {
-      localStorage.setItem('dw_positions_v5', JSON.stringify(positions));
-      localStorage.setItem('dw_transactions_v5', JSON.stringify(transactions));
+      localStorage.setItem('dw_positions_v6', JSON.stringify(positions));
+      localStorage.setItem('dw_transactions_v6', JSON.stringify(transactions));
     }
   }, [positions, transactions, isLoaded]);
 
@@ -36,25 +36,12 @@ export function usePortfolio() {
     const id = Math.random().toString(36).substring(7);
     const ticker = newPos.ticker.toUpperCase();
     const position: PortfolioPosition = { ...newPos, ticker, id, manualAdjustments: {} };
-    
     setPositions(prev => [...prev, position]);
-    
-    const transaction: TransactionRecord = {
-      id: `t_${Date.now()}`,
-      ticker: ticker,
-      type: 'buy',
-      date: format(new Date(), 'yyyy-MM-dd'),
-      shares: newPos.shares,
-      price: newPos.purchasePrice,
-      totalAmount: newPos.shares * newPos.purchasePrice
-    };
-    setTransactions(prev => [transaction, ...prev]);
   }, []);
 
   const updatePosition = useCallback((id: string, updatedFields: Partial<PortfolioPosition>) => {
     setPositions(prev => prev.map(p => {
       if (p.id === id) {
-        // If nextExDate or dividendAmount is updated from Portfolio page, clear all individual calendar overrides
         const shouldReset = updatedFields.nextExDate !== undefined || updatedFields.dividendAmount !== undefined;
         const nextAdjustments = shouldReset ? {} : p.manualAdjustments;
         return { ...p, ...updatedFields, manualAdjustments: nextAdjustments };
@@ -80,22 +67,17 @@ export function usePortfolio() {
   }, []);
 
   const deletePosition = useCallback((id: string) => {
-    const pos = positions.find(p => p.id === id);
-    if (!pos) return;
-
     setPositions(prev => prev.filter(p => p.id !== id));
-    
+  }, []);
+
+  const addTransaction = useCallback((tx: Omit<TransactionRecord, 'id'>) => {
     const transaction: TransactionRecord = {
+      ...tx,
       id: `t_${Date.now()}`,
-      ticker: pos.ticker,
-      type: 'sell',
-      date: format(new Date(), 'yyyy-MM-dd'),
-      shares: pos.shares,
-      price: 0,
-      totalAmount: 0
+      ticker: tx.ticker.toUpperCase()
     };
     setTransactions(prev => [transaction, ...prev]);
-  }, [positions]);
+  }, []);
 
   const deleteTransaction = useCallback((id: string) => {
     setTransactions(prev => prev.filter(t => t.id !== id));
@@ -128,7 +110,6 @@ export function usePortfolio() {
 
         const adjustment = pos.manualAdjustments?.[i];
 
-        // 1. Handle overrides and shifts
         if (adjustment) {
           if (adjustment.date) {
             exDate = new Date(adjustment.date);
@@ -150,7 +131,6 @@ export function usePortfolio() {
           status = 'edited';
           lastAnchorIndex = i;
         } 
-        // 2. Standard projections relative to last anchor
         else {
           const diff = i - lastAnchorIndex;
           if (pos.frequency === 'semi-monthly') {
@@ -191,6 +171,7 @@ export function usePortfolio() {
     updatePosition,
     updateManualAdjustment,
     deletePosition,
+    addTransaction,
     deleteTransaction,
     getAllDividends,
     isLoaded

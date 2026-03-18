@@ -1,15 +1,57 @@
 "use client"
 
+import { useState } from 'react';
 import { usePortfolio } from "@/hooks/use-portfolio";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { format } from 'date-fns';
-import { History, ArrowUpRight, ArrowDownRight, Gift, Trash2 } from "lucide-react";
+import { History, ArrowUpRight, ArrowDownRight, Gift, Trash2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { TransactionType } from '@/lib/types';
+import { cn } from '@/lib/utils';
 
 export default function HistoryPage() {
-  const { transactions, deleteTransaction, isLoaded } = usePortfolio();
+  const { transactions, deleteTransaction, addTransaction, isLoaded } = usePortfolio();
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [formData, setFormData] = useState({
+    ticker: "",
+    type: "buy" as TransactionType,
+    date: format(new Date(), 'yyyy-MM-dd'),
+    shares: 0,
+    price: 0,
+    totalAmount: 0
+  });
+
+  const handleLogTransaction = () => {
+    if (!formData.ticker || formData.shares < 0) return;
+    
+    // Auto-calculate total if not provided, or use provided
+    const finalTotal = formData.totalAmount || (formData.shares * formData.price);
+    
+    addTransaction({
+      ticker: formData.ticker.toUpperCase(),
+      type: formData.type,
+      date: formData.date,
+      shares: Number(formData.shares),
+      price: Number(formData.price),
+      totalAmount: Number(finalTotal)
+    });
+    
+    setFormData({
+      ticker: "",
+      type: "buy",
+      date: format(new Date(), 'yyyy-MM-dd'),
+      shares: 0,
+      price: 0,
+      totalAmount: 0
+    });
+    setIsAddOpen(false);
+  };
 
   if (!isLoaded) return <div className="p-8 text-center">Loading...</div>;
 
@@ -18,8 +60,92 @@ export default function HistoryPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-primary">Activity History</h1>
-          <p className="text-muted-foreground">A record of your portfolio changes and received dividends.</p>
+          <p className="text-muted-foreground">A record of your buys, sells, and dividends.</p>
         </div>
+
+        <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+          <DialogTrigger asChild>
+            <Button className="bg-primary hover:bg-primary/90">
+              <Plus className="h-4 w-4 mr-2" />
+              Log Transaction
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Log Transaction</DialogTitle>
+              <DialogDescription>Manually record a buy, sell, or dividend payment.</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label>Ticker</Label>
+                  <Input 
+                    placeholder="AAPL" 
+                    value={formData.ticker} 
+                    onChange={e => setFormData(prev => ({ ...prev, ticker: e.target.value }))} 
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Type</Label>
+                  <Select 
+                    value={formData.type} 
+                    onValueChange={(v: TransactionType) => setFormData(prev => ({ ...prev, type: v }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="buy">Buy</SelectItem>
+                      <SelectItem value="sell">Sell</SelectItem>
+                      <SelectItem value="dividend">Dividend</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <Label>Date</Label>
+                <Input 
+                  type="date" 
+                  value={formData.date} 
+                  onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))} 
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label>Shares</Label>
+                  <Input 
+                    type="number" 
+                    value={formData.shares} 
+                    onChange={e => setFormData(prev => ({ ...prev, shares: Number(e.target.value) }))} 
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>{formData.type === 'dividend' ? 'Amount Per Share' : 'Price'}</Label>
+                  <Input 
+                    type="number" 
+                    step="0.001" 
+                    value={formData.price} 
+                    onChange={e => setFormData(prev => ({ ...prev, price: Number(e.target.value) }))} 
+                  />
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <Label>Total Amount (Optional if Price/Shares set)</Label>
+                <Input 
+                  type="number" 
+                  step="0.01" 
+                  placeholder={(formData.shares * formData.price).toFixed(2)}
+                  value={formData.totalAmount || ""} 
+                  onChange={e => setFormData(prev => ({ ...prev, totalAmount: Number(e.target.value) }))} 
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button>
+              <Button onClick={handleLogTransaction}>Save Record</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
       <Card className="border-none shadow-sm bg-white overflow-hidden">
@@ -61,7 +187,7 @@ export default function HistoryPage() {
                   <TableCell>{t.shares}</TableCell>
                   <TableCell className={cn(
                     "text-right font-bold",
-                    t.type === 'sell' || t.type === 'buy' ? "text-primary" : "text-accent"
+                    t.type === 'dividend' ? "text-accent" : "text-primary"
                   )}>
                     {t.type === 'dividend' ? `+` : ``}${t.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </TableCell>
@@ -91,8 +217,4 @@ export default function HistoryPage() {
       </Card>
     </div>
   );
-}
-
-function cn(...classes: any[]) {
-  return classes.filter(Boolean).join(' ');
 }
