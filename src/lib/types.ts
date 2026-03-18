@@ -7,11 +7,11 @@ export interface PortfolioPosition {
   shares: number;
   purchaseDate: string;
   purchasePrice: number;
-  // Manual Dividend Fields
   dividendAmount: number; // Per share
   frequency: DividendFrequency;
-  nextExDate: string; // YYYY-MM-DD
-  isManualDate?: boolean; // Whether the nextExDate was explicitly set by user
+  nextExDate: string; // YYYY-MM-DD (Base Anchor)
+  isManualDate?: boolean;
+  manualAdjustments?: Record<number, string>; // Maps iteration index to a manually set date
 }
 
 export interface DividendData {
@@ -21,7 +21,10 @@ export interface DividendData {
   payoutDate: string;
   amountPerShare: number;
   yield?: number;
-  isManual?: boolean;
+  totalAmount: number;
+  sharesAtTime: number;
+  index: number; // Iteration index in the projection
+  status: 'base' | 'edited' | 'projected';
 }
 
 export interface TransactionRecord {

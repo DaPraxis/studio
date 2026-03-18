@@ -3,8 +3,8 @@
 import { useState, useMemo } from 'react';
 import { usePortfolio } from "@/hooks/use-portfolio";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isSameMonth } from 'date-fns';
-import { ChevronLeft, ChevronRight, Info, Calendar as CalendarIcon, Edit3 } from 'lucide-react';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths } from 'date-fns';
+import { ChevronLeft, ChevronRight, Edit3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 export default function DividendCalendar() {
-  const { getAllDividends, positions, updatePosition, isLoaded } = usePortfolio();
+  const { getAllDividends, positions, updateManualAdjustment, isLoaded } = usePortfolio();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [editingDividend, setEditingDividend] = useState<any>(null);
@@ -37,10 +37,7 @@ export default function DividendCalendar() {
     
     const pos = positions.find(p => p.ticker === editingDividend.ticker);
     if (pos) {
-      updatePosition(pos.id, {
-        nextExDate: newDate,
-        isManualDate: true
-      });
+      updateManualAdjustment(pos.id, editingDividend.index, newDate);
     }
     setEditingDividend(null);
     setNewDate("");
@@ -103,8 +100,8 @@ export default function DividendCalendar() {
                         isPayout ? "bg-primary text-white" : "bg-accent/20 text-accent"
                       )}
                     >
-                      <span>{ev.ticker} {isPayout ? `$${ev.totalAmount.toFixed(0)}` : 'Ex'}</span>
-                      {ev.isManual && !isPayout && <span className="w-1 h-1 rounded-full bg-accent ml-1" />}
+                      <span className="truncate">{ev.ticker} {isPayout ? `$${ev.totalAmount.toFixed(0)}` : 'Ex'}</span>
+                      {!isPayout && ev.status === 'edited' && <div className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
                     </div>
                   );
                 })}
@@ -138,8 +135,14 @@ export default function DividendCalendar() {
                       <div>
                         <div className="flex items-center gap-2">
                           <div className="font-bold text-lg">{ev.ticker}</div>
-                          <Badge variant={ev.isManual ? "outline" : "secondary"} className="text-[10px] px-1.5 h-4">
-                            {ev.isManual ? "Manual" : "Projected"}
+                          <Badge 
+                            variant={ev.status === 'edited' ? "default" : "outline"} 
+                            className={cn(
+                              "text-[10px] px-1.5 h-4 capitalize",
+                              ev.status === 'edited' && "bg-accent hover:bg-accent"
+                            )}
+                          >
+                            {ev.status}
                           </Badge>
                         </div>
                         <div className="flex items-center gap-2">
@@ -189,9 +192,9 @@ export default function DividendCalendar() {
       <Dialog open={!!editingDividend} onOpenChange={() => setEditingDividend(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Adjust Ex-Dividend Date</DialogTitle>
+            <DialogTitle>Adjust Event Date</DialogTitle>
             <DialogDescription>
-              Changing this will auto-shift all future projected dates for {editingDividend?.ticker}.
+              Changing this will shift all future projected dates for {editingDividend?.ticker}. Past dates will remain.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from 'react';
-import { PortfolioPosition, TransactionRecord, DividendData } from '@/lib/types';
+import { PortfolioPosition, TransactionRecord, DividendData, DividendFrequency } from '@/lib/types';
 import { INITIAL_POSITIONS, INITIAL_TRANSACTIONS } from '@/lib/mock-data';
 import { format, addMonths, addDays, isSameDay } from 'date-fns';
 
@@ -11,8 +11,8 @@ export function usePortfolio() {
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    const savedPositions = localStorage.getItem('dw_positions_v3');
-    const savedTransactions = localStorage.getItem('dw_transactions_v3');
+    const savedPositions = localStorage.getItem('dw_positions_v4');
+    const savedTransactions = localStorage.getItem('dw_transactions_v4');
     
     if (savedPositions && savedTransactions) {
       setPositions(JSON.parse(savedPositions));
@@ -27,15 +27,15 @@ export function usePortfolio() {
 
   useEffect(() => {
     if (isLoaded) {
-      localStorage.setItem('dw_positions_v3', JSON.stringify(positions));
-      localStorage.setItem('dw_transactions_v3', JSON.stringify(transactions));
+      localStorage.setItem('dw_positions_v4', JSON.stringify(positions));
+      localStorage.setItem('dw_transactions_v4', JSON.stringify(transactions));
     }
   }, [positions, transactions, isLoaded]);
 
   const addPosition = useCallback((newPos: Omit<PortfolioPosition, 'id'>) => {
     const id = Math.random().toString(36).substring(7);
     const ticker = newPos.ticker.toUpperCase();
-    const position: PortfolioPosition = { ...newPos, ticker, id };
+    const position: PortfolioPosition = { ...newPos, ticker, id, manualAdjustments: {} };
     
     setPositions(prev => [...prev, position]);
     
@@ -52,7 +52,29 @@ export function usePortfolio() {
   }, []);
 
   const updatePosition = useCallback((id: string, updatedFields: Partial<PortfolioPosition>) => {
-    setPositions(prev => prev.map(p => p.id === id ? { ...p, ...updatedFields } : p));
+    setPositions(prev => prev.map(p => {
+      if (p.id === id) {
+        // If nextExDate is updated (usually from Portfolio page), clear all manual overrides
+        const nextAdjustments = updatedFields.nextExDate ? {} : p.manualAdjustments;
+        return { ...p, ...updatedFields, manualAdjustments: nextAdjustments };
+      }
+      return p;
+    }));
+  }, []);
+
+  const updateManualAdjustment = useCallback((posId: string, index: number, newDate: string) => {
+    setPositions(prev => prev.map(p => {
+      if (p.id === posId) {
+        return {
+          ...p,
+          manualAdjustments: {
+            ...(p.manualAdjustments || {}),
+            [index]: newDate
+          }
+        };
+      }
+      return p;
+    }));
   }, []);
 
   const deletePosition = useCallback((id: string) => {
@@ -78,51 +100,59 @@ export function usePortfolio() {
   }, []);
 
   const getAllDividends = useCallback(() => {
-    const allDivs: Array<DividendData & { totalAmount: number; sharesAtTime: number }> = [];
+    const allDivs: DividendData[] = [];
     
     positions.forEach(pos => {
-      const startDate = new Date(pos.nextExDate);
+      const baseDate = new Date(pos.nextExDate);
       let iterations = 0;
-      let monthsToAdd = 0;
-      let daysToAdd = 0;
+      let monthsStep = 0;
+      let daysStep = 0;
 
-      if (pos.frequency === 'monthly') {
-        iterations = 12;
-        monthsToAdd = 1;
-      } else if (pos.frequency === 'quarterly') {
-        iterations = 4;
-        monthsToAdd = 3;
-      } else if (pos.frequency === 'annually') {
-        iterations = 1;
-        monthsToAdd = 12;
-      } else if (pos.frequency === 'semi-monthly') {
-        iterations = 24;
-        daysToAdd = 15;
-      }
+      if (pos.frequency === 'monthly') { iterations = 12; monthsStep = 1; }
+      else if (pos.frequency === 'quarterly') { iterations = 4; monthsStep = 3; }
+      else if (pos.frequency === 'annually') { iterations = 1; monthsStep = 12; }
+      else if (pos.frequency === 'semi-monthly') { iterations = 24; daysStep = 15; }
+
+      let currentAnchorDate = baseDate;
+      let lastAnchorIndex = 0;
 
       for (let i = 0; i < iterations; i++) {
         let exDate: Date;
-        if (pos.frequency === 'semi-monthly') {
-          exDate = addDays(startDate, i * daysToAdd);
-        } else {
-          exDate = addMonths(startDate, i * monthsToAdd);
+        let status: 'base' | 'edited' | 'projected' = 'projected';
+
+        // 1. Check if this specific occurrence is manually edited
+        if (pos.manualAdjustments?.[i]) {
+          exDate = new Date(pos.manualAdjustments[i]);
+          status = 'edited';
+          // Move the anchor for all future projections in this loop
+          currentAnchorDate = exDate;
+          lastAnchorIndex = i;
+        } 
+        // 2. Otherwise, calculate relative to the last anchor (either the base or a previous edit)
+        else {
+          const diff = i - lastAnchorIndex;
+          if (pos.frequency === 'semi-monthly') {
+            exDate = addDays(currentAnchorDate, diff * daysStep);
+          } else {
+            exDate = addMonths(currentAnchorDate, diff * monthsStep);
+          }
+          
+          if (i === 0) status = 'base';
+          else status = 'projected';
         }
-        
+
         const payoutDate = addDays(exDate, 10);
         
-        // Mark the first one as manual if the position itself says so
-        const isManual = i === 0 && pos.isManualDate;
-
         allDivs.push({
           ticker: pos.ticker,
           exDate: format(exDate, 'yyyy-MM-dd'),
           recordDate: format(exDate, 'yyyy-MM-dd'),
           payoutDate: format(payoutDate, 'yyyy-MM-dd'),
           amountPerShare: pos.dividendAmount,
-          yield: pos.purchasePrice > 0 ? (pos.dividendAmount * (iterations) / pos.purchasePrice) * 100 : 0,
           totalAmount: pos.shares * pos.dividendAmount,
           sharesAtTime: pos.shares,
-          isManual: isManual
+          index: i,
+          status: status
         });
       }
     });
@@ -135,6 +165,7 @@ export function usePortfolio() {
     transactions,
     addPosition,
     updatePosition,
+    updateManualAdjustment,
     deletePosition,
     deleteTransaction,
     getAllDividends,
