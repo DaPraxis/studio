@@ -1,4 +1,5 @@
 export type TransactionType = 'buy' | 'sell' | 'dividend';
+export type DividendFrequency = 'monthly' | 'quarterly' | 'annually';
 
 export interface PortfolioPosition {
   id: string;
@@ -6,6 +7,10 @@ export interface PortfolioPosition {
   shares: number;
   purchaseDate: string;
   purchasePrice: number;
+  // Manual Dividend Fields
+  dividendAmount: number; // Per share
+  frequency: DividendFrequency;
+  nextExDate: string; // YYYY-MM-DD
 }
 
 export interface DividendData {

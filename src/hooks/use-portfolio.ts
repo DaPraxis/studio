@@ -1,27 +1,19 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { PortfolioPosition, TransactionRecord, DividendData } from '@/lib/types';
 import { INITIAL_POSITIONS, INITIAL_TRANSACTIONS } from '@/lib/mock-data';
-import { format } from 'date-fns';
-import { getTickerFinancials } from '@/app/actions/financials';
-
-// Cache data for 7 days to conserve API quota
-const CACHE_EXPIRY = 7 * 24 * 60 * 60 * 1000; 
+import { format, addMonths, isAfter, isBefore, addDays } from 'date-fns';
 
 export function usePortfolio() {
   const [positions, setPositions] = useState<PortfolioPosition[]>([]);
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
-  const [dividendMap, setDividendMap] = useState<Record<string, { data: DividendData[], updatedAt: number }>>({});
   const [isLoaded, setIsLoaded] = useState(false);
-  const [isFetchingData, setIsFetchingData] = useState(false);
-  const fetchInProgress = useRef(false);
 
   // Initial Load from LocalStorage
   useEffect(() => {
-    const savedPositions = localStorage.getItem('dw_positions');
-    const savedTransactions = localStorage.getItem('dw_transactions');
-    const savedDividends = localStorage.getItem('dw_dividend_cache');
+    const savedPositions = localStorage.getItem('dw_positions_v2');
+    const savedTransactions = localStorage.getItem('dw_transactions_v2');
     
     if (savedPositions && savedTransactions) {
       setPositions(JSON.parse(savedPositions));
@@ -31,95 +23,16 @@ export function usePortfolio() {
       setTransactions(INITIAL_TRANSACTIONS);
     }
 
-    if (savedDividends) {
-      setDividendMap(JSON.parse(savedDividends));
-    }
-
     setIsLoaded(true);
   }, []);
 
   // Sync Positions/Transactions to LocalStorage
   useEffect(() => {
     if (isLoaded) {
-      localStorage.setItem('dw_positions', JSON.stringify(positions));
-      localStorage.setItem('dw_transactions', JSON.stringify(transactions));
+      localStorage.setItem('dw_positions_v2', JSON.stringify(positions));
+      localStorage.setItem('dw_transactions_v2', JSON.stringify(transactions));
     }
   }, [positions, transactions, isLoaded]);
-
-  // Sync Dividend Cache to LocalStorage
-  useEffect(() => {
-    if (isLoaded && Object.keys(dividendMap).length > 0) {
-      localStorage.setItem('dw_dividend_cache', JSON.stringify(dividendMap));
-    }
-  }, [dividendMap, isLoaded]);
-
-  // Fetch Live Data for Tickers (Optimized for EODHD 20/day limit)
-  useEffect(() => {
-    let isCancelled = false;
-
-    async function fetchAllTickerData() {
-      if (!isLoaded || positions.length === 0 || fetchInProgress.current) return;
-      
-      const allTickers = [...new Set(positions.map(p => p.ticker.toUpperCase()))];
-      const now = Date.now();
-
-      // Only fetch if we don't have it OR it's older than CACHE_EXPIRY
-      const tickersToFetch = allTickers.filter(t => {
-        const cached = dividendMap[t];
-        const isStale = cached && (now - cached.updatedAt > CACHE_EXPIRY);
-        return !cached || isStale;
-      });
-
-      if (tickersToFetch.length === 0) return;
-
-      setIsFetchingData(true);
-      fetchInProgress.current = true;
-      
-      try {
-        for (const ticker of tickersToFetch) {
-          if (isCancelled) break;
-          
-          const result = await getTickerFinancials(ticker);
-          
-          if (isCancelled) break;
-
-          if (result) {
-            setDividendMap(prev => ({
-              ...prev,
-              [ticker]: { 
-                data: result.dividendHistory || [], 
-                updatedAt: Date.now() 
-              },
-              // If the ticker was resolved to a specific exchange (e.g. YSTL -> YSTL.NE), map that too
-              ...(result.ticker && result.ticker !== ticker ? { 
-                [result.ticker]: { data: result.dividendHistory || [], updatedAt: Date.now() } 
-              } : {})
-            }));
-          } else {
-            // Mark as empty but "updated" so we don't spam API retries for broken symbols
-            setDividendMap(prev => ({
-              ...prev,
-              [ticker]: { data: [], updatedAt: Date.now() }
-            }));
-          }
-        }
-      } catch (error) {
-        console.error("Batch fetch failed", error);
-      } finally {
-        if (!isCancelled) {
-          setIsFetchingData(false);
-          fetchInProgress.current = false;
-        }
-      }
-    }
-
-    fetchAllTickerData();
-
-    return () => {
-      isCancelled = true;
-      fetchInProgress.current = false;
-    };
-  }, [positions, isLoaded, dividendMap]);
 
   const addPosition = useCallback((newPos: Omit<PortfolioPosition, 'id'>) => {
     const id = Math.random().toString(36).substring(7);
@@ -162,27 +75,38 @@ export function usePortfolio() {
     setTransactions(prev => [transaction, ...prev]);
   }, [positions]);
 
+  /**
+   * Projects future dividends based on manual input.
+   * Generates a 12-month schedule starting from nextExDate.
+   */
   const getAllDividends = useCallback(() => {
     const allDivs: Array<DividendData & { totalAmount: number; sharesAtTime: number }> = [];
+    
     positions.forEach(pos => {
-      const ticker = pos.ticker.toUpperCase();
-      const cached = dividendMap[ticker];
-      const divs = cached?.data || [];
-      
-      divs.forEach(d => {
+      const startDate = new Date(pos.nextExDate);
+      let iterations = pos.frequency === 'monthly' ? 12 : pos.frequency === 'quarterly' ? 4 : 1;
+      let monthsToAdd = pos.frequency === 'monthly' ? 1 : pos.frequency === 'quarterly' ? 3 : 12;
+
+      for (let i = 0; i < iterations; i++) {
+        const exDate = addMonths(startDate, i * monthsToAdd);
+        // Estimated payout is 10 days after ex-date
+        const payoutDate = addDays(exDate, 10);
+
         allDivs.push({
-          ...d,
-          totalAmount: pos.shares * d.amountPerShare,
+          ticker: pos.ticker,
+          exDate: format(exDate, 'yyyy-MM-dd'),
+          recordDate: format(exDate, 'yyyy-MM-dd'),
+          payoutDate: format(payoutDate, 'yyyy-MM-dd'),
+          amountPerShare: pos.dividendAmount,
+          yield: pos.purchasePrice > 0 ? (pos.dividendAmount * (12/monthsToAdd) / pos.purchasePrice) * 100 : 0,
+          totalAmount: pos.shares * pos.dividendAmount,
           sharesAtTime: pos.shares
         });
-      });
+      }
     });
-    return allDivs.sort((a, b) => new Date(b.exDate).getTime() - new Date(a.exDate).getTime());
-  }, [positions, dividendMap]);
 
-  const getTickerData = useCallback((ticker: string) => {
-    return dividendMap[ticker.toUpperCase()]?.data || [];
-  }, [dividendMap]);
+    return allDivs.sort((a, b) => new Date(a.exDate).getTime() - new Date(b.exDate).getTime());
+  }, [positions]);
 
   return {
     positions,
@@ -191,8 +115,6 @@ export function usePortfolio() {
     updatePosition,
     deletePosition,
     getAllDividends,
-    getTickerData,
-    isLoaded,
-    isFetchingData
+    isLoaded
   };
 }
