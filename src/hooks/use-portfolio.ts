@@ -15,8 +15,20 @@ export function usePortfolio() {
   useEffect(() => {
     const savedTx = localStorage.getItem(STORAGE_KEY_TX);
     const savedAdj = localStorage.getItem(STORAGE_KEY_ADJ);
-    if (savedTx) setTransactions(JSON.parse(savedTx));
-    if (savedAdj) setManualAdjustments(JSON.parse(savedAdj));
+    if (savedTx) {
+      try {
+        setTransactions(JSON.parse(savedTx));
+      } catch (e) {
+        console.error("Failed to parse transactions", e);
+      }
+    }
+    if (savedAdj) {
+      try {
+        setManualAdjustments(JSON.parse(savedAdj));
+      } catch (e) {
+        console.error("Failed to parse adjustments", e);
+      }
+    }
     setIsLoaded(true);
   }, []);
 
@@ -59,6 +71,7 @@ export function usePortfolio() {
       if (tx.type === 'buy') {
         p.shares += txShares;
         p.totalCost += txAmount;
+        // Only update dividend info if provided in the transaction
         if (tx.dividendAmount !== undefined) p.dividendAmount = Number(tx.dividendAmount);
         if (tx.frequency !== undefined) p.frequency = tx.frequency;
         if (tx.nextExDate !== undefined) p.nextExDate = tx.nextExDate;
@@ -87,7 +100,8 @@ export function usePortfolio() {
   }, [transactions, manualAdjustments]);
 
   const addTransaction = useCallback((tx: Omit<TransactionRecord, 'id'>) => {
-    const uniqueId = `t_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    // Generate a high-precision unique ID to avoid collisions during rapid imports
+    const uniqueId = `t_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
     const ticker = tx.ticker.toUpperCase();
     
     setTransactions(prev => {
@@ -95,6 +109,7 @@ export function usePortfolio() {
       return [...prev, newTx];
     });
 
+    // If a buy provides new dividend info, we clear adjustments because the index anchor shifts
     if (tx.type === 'buy' && (tx.nextExDate !== undefined || tx.dividendAmount !== undefined)) {
       setManualAdjustments(prev => {
         const next = { ...prev };
@@ -121,14 +136,24 @@ export function usePortfolio() {
     });
   }, []);
 
-  const importData = useCallback((data: { transactions: TransactionRecord[], manualAdjustments?: any }) => {
-    if (data.transactions) setTransactions(data.transactions);
-    if (data.manualAdjustments) setManualAdjustments(data.manualAdjustments);
+  const importData = useCallback((data: { transactions: TransactionRecord[], manualAdjustments?: Record<string, any> }) => {
+    if (data.transactions) {
+      // Ensure all imported transactions have IDs
+      const txs = data.transactions.map(t => ({
+        ...t,
+        id: t.id || `t_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+      }));
+      setTransactions(txs);
+    }
+    if (data.manualAdjustments) {
+      setManualAdjustments(data.manualAdjustments);
+    }
   }, []);
 
   const getAllDividends = useCallback(() => {
     const allDivs: DividendData[] = [];
     
+    // 1. Add actual paid dividends from history
     transactions.forEach(tx => {
       if (tx.type === 'dividend') {
         const exDateStr = tx.nextExDate || tx.date;
@@ -146,6 +171,7 @@ export function usePortfolio() {
       }
     });
 
+    // 2. Project future dividends based on current positions
     positions.forEach(pos => {
       const baseDate = parseISO(pos.nextExDate);
       const baseAmount = pos.dividendAmount;
@@ -202,6 +228,7 @@ export function usePortfolio() {
         const payoutDate = addDays(exDate, 10);
         const exDateStr = format(exDate, 'yyyy-MM-dd');
 
+        // Qualification logic: Only shares owned BEFORE (strictly) the ex-dividend date qualify
         const sharesAtDate = transactions
           .filter(tx => tx.ticker === pos.ticker && isBefore(parseISO(tx.date), startOfDay(parseISO(exDateStr))))
           .reduce((sum, tx) => {
@@ -217,8 +244,8 @@ export function usePortfolio() {
             exDate: exDateStr,
             recordDate: exDateStr,
             payoutDate: format(payoutDate, 'yyyy-MM-dd'),
-            amountPerShare: amountPerShare,
-            totalAmount: Number((sharesAtDate * amountPerShare).toFixed(2)),
+            amountPerShare: Number(amountPerShare) || 0,
+            totalAmount: Number((sharesAtDate * amountPerShare).toFixed(2)) || 0,
             sharesAtTime: sharesAtDate,
             index: i,
             status: status
@@ -227,6 +254,7 @@ export function usePortfolio() {
       }
     });
 
+    // Deduplicate and sort
     const seen = new Set();
     return allDivs.filter(div => {
       const key = `${div.ticker}-${div.exDate}`;

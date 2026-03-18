@@ -38,10 +38,11 @@ export default function HistoryPage() {
     nextExDate: format(new Date(), 'yyyy-MM-dd')
   });
 
+  // Automatically detect if stock exists and set default switch state
   useEffect(() => {
     const existing = positions.find(p => p.ticker === formData.ticker.toUpperCase());
     if (existing) {
-      setUpdateDivInfo(false);
+      setUpdateDivInfo(false); // Default to FALSE for existing stocks
       setFormData(prev => ({
         ...prev,
         dividendAmount: existing.dividendAmount,
@@ -49,7 +50,7 @@ export default function HistoryPage() {
         nextExDate: existing.nextExDate
       }));
     } else {
-      setUpdateDivInfo(true);
+      setUpdateDivInfo(true); // Default to TRUE for new stocks
     }
   }, [formData.ticker, positions]);
 
@@ -72,6 +73,7 @@ export default function HistoryPage() {
       shares: Number(formData.shares),
       price: Number(formData.price),
       totalAmount: Number(finalTotal),
+      // Only include dividend data if it's a new stock or user explicitly wants to update schedule
       dividendAmount: (formData.type === 'dividend' || (formData.type === 'buy' && updateDivInfo)) ? Number(formData.dividendAmount) : undefined,
       frequency: (formData.type === 'buy' && updateDivInfo) ? formData.frequency : undefined,
       nextExDate: (formData.type === 'dividend' || (formData.type === 'buy' && updateDivInfo)) ? formData.nextExDate : undefined
@@ -92,6 +94,7 @@ export default function HistoryPage() {
   };
 
   const exportToJSON = () => {
+    // This includes BOTH transactions AND manual calendar adjustments
     const data = { transactions, manualAdjustments };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -99,7 +102,7 @@ export default function HistoryPage() {
     link.href = url;
     link.download = `dividendwise_backup_${format(new Date(), 'yyyyMMdd')}.json`;
     link.click();
-    toast({ title: "Exported JSON", description: "Database backup saved to your local machine." });
+    toast({ title: "Exported JSON", description: "Full database backup saved (includes all adjustments)." });
   };
 
   const exportToCSV = () => {
@@ -128,8 +131,9 @@ export default function HistoryPage() {
         if (importType === 'json') {
           const data = JSON.parse(text);
           importData(data);
-          toast({ title: "Import Successful", description: "Portfolio and adjustments restored." });
+          toast({ title: "Import Successful", description: "Portfolio and manual adjustments restored." });
         } else {
+          // CSV Import (Transactions Only)
           const lines = text.split("\n");
           const headers = lines[0].split(",");
           lines.slice(1).forEach(line => {
@@ -163,7 +167,7 @@ export default function HistoryPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-primary">Activity History</h1>
-          <p className="text-muted-foreground">Manage your transactions. Data is saved locally in your browser.</p>
+          <p className="text-muted-foreground">Manage your transactions. Use JSON Export for a full backup of all settings.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -184,10 +188,10 @@ export default function HistoryPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent>
               <DropdownMenuItem onClick={() => { setImportType('json'); setTimeout(() => fileInputRef.current?.click(), 100); }}>
-                <FileJson className="h-4 w-4 mr-2" /> JSON Backup
+                <FileJson className="h-4 w-4 mr-2" /> JSON Backup (Full)
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => { setImportType('csv'); setTimeout(() => fileInputRef.current?.click(), 100); }}>
-                <FileSpreadsheet className="h-4 w-4 mr-2" /> CSV Table
+                <FileSpreadsheet className="h-4 w-4 mr-2" /> CSV Table (Tx Only)
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
