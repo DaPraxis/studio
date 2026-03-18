@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { PortfolioPosition, TransactionRecord, DividendData } from '@/lib/types';
 import { INITIAL_POSITIONS, INITIAL_TRANSACTIONS } from '@/lib/mock-data';
 import { format } from 'date-fns';
@@ -12,6 +12,7 @@ export function usePortfolio() {
   const [dividendMap, setDividendMap] = useState<Record<string, DividendData[]>>({});
   const [isLoaded, setIsLoaded] = useState(false);
   const [isFetchingData, setIsFetchingData] = useState(false);
+  const fetchInProgress = useRef(false);
 
   // Initial Load from LocalStorage
   useEffect(() => {
@@ -41,40 +42,47 @@ export function usePortfolio() {
     let isCancelled = false;
 
     async function fetchAllTickerData() {
-      if (!isLoaded || positions.length === 0) return;
+      if (!isLoaded || positions.length === 0 || fetchInProgress.current) return;
       
-      // Get unique tickers
       const allTickers = [...new Set(positions.map(p => p.ticker.toUpperCase()))];
-      
-      // Only fetch tickers we don't have data for in the current session
       const tickersToFetch = allTickers.filter(t => !dividendMap[t]);
 
       if (tickersToFetch.length === 0) return;
 
       setIsFetchingData(true);
+      fetchInProgress.current = true;
       
       try {
-        // Fetch tickers sequentially or in small batches to avoid Yahoo rate limits
-        // Sequential is safer for reliability with multiple suffixes
+        // Fetch sequentially to stay within Yahoo rate limits and manage timeouts better
         for (const ticker of tickersToFetch) {
           if (isCancelled) break;
           
-          const data = await getTickerFinancials(ticker);
-          
-          if (isCancelled) break;
+          try {
+            // Set a safety timeout for the server action itself
+            const data = await getTickerFinancials(ticker);
+            
+            if (isCancelled) break;
 
-          setDividendMap(prev => ({
-            ...prev,
-            [ticker]: data?.dividendHistory || [],
-            // Also map the resolved symbol if it was different (e.g. YTSL -> YTSL.NE)
-            ...(data?.ticker && data.ticker !== ticker ? { [data.ticker]: data.dividendHistory || [] } : {})
-          }));
+            if (data) {
+              setDividendMap(prev => ({
+                ...prev,
+                [ticker]: data.dividendHistory || [],
+                // Also cache under the resolved symbol if different
+                ...(data.ticker && data.ticker !== ticker ? { [data.ticker]: data.dividendHistory || [] } : {})
+              }));
+            }
+          } catch (tickerError) {
+            console.error(`Error fetching data for ${ticker}:`, tickerError);
+            // Mark as fetched with empty data to avoid re-retrying this session
+            setDividendMap(prev => ({ ...prev, [ticker]: [] }));
+          }
         }
       } catch (error) {
         console.error("Portfolio data fetch failed:", error);
       } finally {
         if (!isCancelled) {
           setIsFetchingData(false);
+          fetchInProgress.current = false;
         }
       }
     }
@@ -83,6 +91,7 @@ export function usePortfolio() {
 
     return () => {
       isCancelled = true;
+      fetchInProgress.current = false;
     };
   }, [positions, isLoaded, dividendMap]);
 
@@ -130,7 +139,6 @@ export function usePortfolio() {
   const getAllDividends = useCallback(() => {
     const allDivs: Array<DividendData & { totalAmount: number; sharesAtTime: number }> = [];
     positions.forEach(pos => {
-      // Try both the original and resolved tickers in the map
       const divs = dividendMap[pos.ticker.toUpperCase()] || [];
       divs.forEach(d => {
         allDivs.push({
@@ -140,7 +148,7 @@ export function usePortfolio() {
         });
       });
     });
-    return allDivs.sort((a, b) => new Date(b.payoutDate).getTime() - new Date(a.payoutDate).getTime());
+    return allDivs.sort((a, b) => new Date(b.exDate).getTime() - new Date(a.exDate).getTime());
   }, [positions, dividendMap]);
 
   const getTickerData = useCallback((ticker: string) => {

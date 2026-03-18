@@ -5,6 +5,20 @@ import { DividendData } from '@/lib/types';
 import { format, subYears } from 'date-fns';
 
 /**
+ * Helper to wrap a promise with a timeout
+ */
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
+  let timeoutId: NodeJS.Timeout;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+}
+
+/**
  * Attempts to fetch data for a ticker, trying common Canadian suffixes if the primary fails.
  */
 async function fetchWithFallbacks(ticker: string) {
@@ -14,23 +28,26 @@ async function fetchWithFallbacks(ticker: string) {
     ticker.toUpperCase(),
     `${baseTicker}.NE`, // NEO Exchange
     `${baseTicker}.TO`, // Toronto Stock Exchange
-    baseTicker,        // Original without suffix
   ];
 
-  // Remove duplicates
-  const uniqueVariations = [...new Set(variations)];
+  // Remove duplicates and empty strings
+  const uniqueVariations = [...new Set(variations)].filter(v => v.length > 0);
 
   for (const symbol of uniqueVariations) {
     try {
-      console.log(`Attempting to fetch data for: ${symbol}`);
-      const quote = await yahooFinance.quote(symbol);
+      // console.log(`Attempting to fetch data for: ${symbol}`);
+      // 5 second timeout for the quote
+      const quote = await withTimeout(
+        yahooFinance.quote(symbol),
+        5000,
+        `Timeout fetching quote for ${symbol}`
+      );
       
-      // If we got a valid quote and it has a price, we consider this symbol valid
       if (quote && quote.regularMarketPrice !== undefined) {
         return { symbol, quote };
       }
     } catch (e) {
-      // Continue to next variation
+      // Continue to next variation if this one fails or times out
       continue;
     }
   }
@@ -54,12 +71,23 @@ export async function getTickerFinancials(ticker: string) {
 
     const { symbol, quote } = result;
     
-    // Fetch dividend events for the last 5 years to get a better history
-    const period1 = subYears(new Date(), 5);
-    const dividends = await yahooFinance.historical(symbol, {
-      period1,
-      events: 'div',
-    });
+    // Fetch dividend events for the last 5 years
+    // 5 second timeout for historical data
+    let dividends: any[] = [];
+    try {
+      const period1 = subYears(new Date(), 5);
+      dividends = await withTimeout(
+        yahooFinance.historical(symbol, {
+          period1,
+          events: 'div',
+        }),
+        5000,
+        `Timeout fetching historical data for ${symbol}`
+      ) || [];
+    } catch (e) {
+      // If historical fails, we still have the quote (yield)
+      console.warn(`Could not fetch history for ${symbol}, using quote only.`);
+    }
 
     const dividendHistory: DividendData[] = (dividends || [])
       .filter((d: any) => d.dividends !== undefined)
