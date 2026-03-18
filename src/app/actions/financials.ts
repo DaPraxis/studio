@@ -14,7 +14,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessa
   });
 
   return Promise.race([promise, timeoutPromise]).finally(() => {
-    clearTimeout(timeoutId);
+    clearTimeout(timeoutId!);
   });
 }
 
@@ -23,11 +23,12 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessa
  */
 async function fetchWithFallbacks(ticker: string) {
   const baseTicker = ticker.split('.')[0].toUpperCase();
-  // Variations to try for Canadian/Generic stocks
+  // Variations to try for Canadian/Generic stocks in priority order
   const variations = [
     ticker.toUpperCase(),
-    `${baseTicker}.NE`, // NEO Exchange
+    `${baseTicker}.NE`, // Cboe Canada (formerly NEO)
     `${baseTicker}.TO`, // Toronto Stock Exchange
+    `${baseTicker}.V`,  // TSX Venture
   ];
 
   // Remove duplicates and empty strings
@@ -35,19 +36,17 @@ async function fetchWithFallbacks(ticker: string) {
 
   for (const symbol of uniqueVariations) {
     try {
-      // console.log(`Attempting to fetch data for: ${symbol}`);
-      // 5 second timeout for the quote
+      // Very strict 4s timeout for the initial quote lookup
       const quote = await withTimeout(
         yahooFinance.quote(symbol),
-        5000,
-        `Timeout fetching quote for ${symbol}`
+        4000,
+        `Timeout lookup for ${symbol}`
       );
       
       if (quote && quote.regularMarketPrice !== undefined) {
         return { symbol, quote };
       }
     } catch (e) {
-      // Continue to next variation if this one fails or times out
       continue;
     }
   }
@@ -72,21 +71,20 @@ export async function getTickerFinancials(ticker: string) {
     const { symbol, quote } = result;
     
     // Fetch dividend events for the last 5 years
-    // 5 second timeout for historical data
     let dividends: any[] = [];
     try {
       const period1 = subYears(new Date(), 5);
+      // 5 second timeout for historical data
       dividends = await withTimeout(
         yahooFinance.historical(symbol, {
           period1,
           events: 'div',
         }),
         5000,
-        `Timeout fetching historical data for ${symbol}`
+        `Timeout history for ${symbol}`
       ) || [];
     } catch (e) {
-      // If historical fails, we still have the quote (yield)
-      console.warn(`Could not fetch history for ${symbol}, using quote only.`);
+      // If historical fails, we still return the quote yield
     }
 
     const dividendHistory: DividendData[] = (dividends || [])
@@ -109,7 +107,6 @@ export async function getTickerFinancials(ticker: string) {
       dividendHistory: dividendHistory,
     };
   } catch (error) {
-    console.error(`Critical error fetching data for ${ticker}:`, error);
     return {
       ticker,
       price: 0,

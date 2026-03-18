@@ -13,6 +13,7 @@ export function usePortfolio() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isFetchingData, setIsFetchingData] = useState(false);
   const fetchInProgress = useRef(false);
+  const lastFetchAttempt = useRef<Record<string, number>>({});
 
   // Initial Load from LocalStorage
   useEffect(() => {
@@ -45,7 +46,14 @@ export function usePortfolio() {
       if (!isLoaded || positions.length === 0 || fetchInProgress.current) return;
       
       const allTickers = [...new Set(positions.map(p => p.ticker.toUpperCase()))];
-      const tickersToFetch = allTickers.filter(t => !dividendMap[t]);
+      
+      // Filter out tickers we already have OR have tried recently (last 2 mins)
+      const now = Date.now();
+      const tickersToFetch = allTickers.filter(t => {
+        const alreadyHasData = dividendMap[t] !== undefined;
+        const recentlyTried = lastFetchAttempt.current[t] && (now - lastFetchAttempt.current[t] < 120000);
+        return !alreadyHasData && !recentlyTried;
+      });
 
       if (tickersToFetch.length === 0) return;
 
@@ -53,12 +61,13 @@ export function usePortfolio() {
       fetchInProgress.current = true;
       
       try {
-        // Fetch sequentially to stay within Yahoo rate limits and manage timeouts better
+        // Fetch sequentially to avoid rate limits and ensure stability
         for (const ticker of tickersToFetch) {
           if (isCancelled) break;
           
+          lastFetchAttempt.current[ticker] = Date.now();
+          
           try {
-            // Set a safety timeout for the server action itself
             const data = await getTickerFinancials(ticker);
             
             if (isCancelled) break;
@@ -67,18 +76,17 @@ export function usePortfolio() {
               setDividendMap(prev => ({
                 ...prev,
                 [ticker]: data.dividendHistory || [],
-                // Also cache under the resolved symbol if different
+                // Also map the resolved ticker if it came back with a suffix (e.g. YSTL -> YSTL.NE)
                 ...(data.ticker && data.ticker !== ticker ? { [data.ticker]: data.dividendHistory || [] } : {})
               }));
             }
           } catch (tickerError) {
-            console.error(`Error fetching data for ${ticker}:`, tickerError);
-            // Mark as fetched with empty data to avoid re-retrying this session
+            // Silently mark as failed for this session to avoid infinite retries
             setDividendMap(prev => ({ ...prev, [ticker]: [] }));
           }
         }
       } catch (error) {
-        console.error("Portfolio data fetch failed:", error);
+        // Global error handling
       } finally {
         if (!isCancelled) {
           setIsFetchingData(false);
@@ -139,7 +147,10 @@ export function usePortfolio() {
   const getAllDividends = useCallback(() => {
     const allDivs: Array<DividendData & { totalAmount: number; sharesAtTime: number }> = [];
     positions.forEach(pos => {
-      const divs = dividendMap[pos.ticker.toUpperCase()] || [];
+      const ticker = pos.ticker.toUpperCase();
+      // Try original ticker or suffix-resolved ticker
+      const divs = dividendMap[ticker] || [];
+      
       divs.forEach(d => {
         allDivs.push({
           ...d,
