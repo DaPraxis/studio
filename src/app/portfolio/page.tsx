@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState } from 'react';
@@ -7,24 +8,27 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Trash2, Search, Loader2 } from "lucide-react";
+import { Plus, Trash2, Search, Loader2, Pencil } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { format } from 'date-fns';
-import { DividendFrequency } from '@/lib/types';
+import { DividendFrequency, PortfolioPosition } from '@/lib/types';
 
 export default function Portfolio() {
-  const { positions, addPosition, deletePosition, isLoaded } = usePortfolio();
+  const { positions, addPosition, updatePosition, deletePosition, isLoaded } = usePortfolio();
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [editingPos, setEditingPos] = useState<PortfolioPosition | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   
-  // Add Form State
-  const [newTicker, setNewTicker] = useState("");
-  const [newShares, setNewShares] = useState(0);
-  const [newPrice, setNewPrice] = useState(0);
-  const [newDivAmount, setNewDivAmount] = useState(0);
-  const [newFrequency, setNewFrequency] = useState<DividendFrequency>('quarterly');
-  const [newNextExDate, setNewNextExDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  // Form State
+  const [formData, setFormData] = useState({
+    ticker: "",
+    shares: 0,
+    purchasePrice: 0,
+    dividendAmount: 0,
+    frequency: 'quarterly' as DividendFrequency,
+    nextExDate: format(new Date(), 'yyyy-MM-dd')
+  });
 
   if (!isLoaded) return <div className="p-8 flex items-center gap-2"><Loader2 className="animate-spin" /> Loading Portfolio...</div>;
 
@@ -32,23 +36,56 @@ export default function Portfolio() {
     p.ticker.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleAdd = () => {
-    if (!newTicker || newShares <= 0) return;
-    addPosition({
-      ticker: newTicker.toUpperCase(),
-      shares: Number(newShares),
-      purchaseDate: format(new Date(), 'yyyy-MM-dd'),
-      purchasePrice: Number(newPrice),
-      dividendAmount: Number(newDivAmount),
-      frequency: newFrequency,
-      nextExDate: newNextExDate
+  const resetForm = () => {
+    setFormData({
+      ticker: "",
+      shares: 0,
+      purchasePrice: 0,
+      dividendAmount: 0,
+      frequency: 'quarterly',
+      nextExDate: format(new Date(), 'yyyy-MM-dd')
     });
-    // Reset form
-    setNewTicker("");
-    setNewShares(0);
-    setNewPrice(0);
-    setNewDivAmount(0);
+  };
+
+  const handleAdd = () => {
+    if (!formData.ticker || formData.shares <= 0) return;
+    addPosition({
+      ticker: formData.ticker.toUpperCase(),
+      shares: Number(formData.shares),
+      purchaseDate: format(new Date(), 'yyyy-MM-dd'),
+      purchasePrice: Number(formData.purchasePrice),
+      dividendAmount: Number(formData.dividendAmount),
+      frequency: formData.frequency,
+      nextExDate: formData.nextExDate
+    });
+    resetForm();
     setIsAddOpen(false);
+  };
+
+  const handleUpdate = () => {
+    if (!editingPos) return;
+    updatePosition(editingPos.id, {
+      ticker: formData.ticker.toUpperCase(),
+      shares: Number(formData.shares),
+      purchasePrice: Number(formData.purchasePrice),
+      dividendAmount: Number(formData.dividendAmount),
+      frequency: formData.frequency,
+      nextExDate: formData.nextExDate
+    });
+    setEditingPos(null);
+    resetForm();
+  };
+
+  const openEdit = (pos: PortfolioPosition) => {
+    setEditingPos(pos);
+    setFormData({
+      ticker: pos.ticker,
+      shares: pos.shares,
+      purchasePrice: pos.purchasePrice,
+      dividendAmount: pos.dividendAmount,
+      frequency: pos.frequency,
+      nextExDate: pos.nextExDate
+    });
   };
 
   return (
@@ -59,7 +96,10 @@ export default function Portfolio() {
           <p className="text-muted-foreground">Manually manage your positions and dividend projections.</p>
         </div>
         
-        <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+        <Dialog open={isAddOpen} onOpenChange={(open) => {
+          setIsAddOpen(open);
+          if (open) resetForm();
+        }}>
           <DialogTrigger asChild>
             <Button className="bg-primary hover:bg-primary/90">
               <Plus className="h-4 w-4 mr-2" />
@@ -71,48 +111,7 @@ export default function Portfolio() {
               <DialogTitle>Add New Position</DialogTitle>
               <DialogDescription>Enter your stock and dividend details manually.</DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="ticker">Ticker Symbol</Label>
-                  <Input id="ticker" placeholder="AAPL" value={newTicker} onChange={e => setNewTicker(e.target.value)} />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="shares">Shares Owned</Label>
-                  <Input id="shares" type="number" value={newShares} onChange={e => setNewShares(Number(e.target.value))} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="price">Avg. Purchase Price</Label>
-                  <Input id="price" type="number" step="0.01" value={newPrice} onChange={e => setNewPrice(Number(e.target.value))} />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="divAmount">Div. Amount (Per Share)</Label>
-                  <Input id="divAmount" type="number" step="0.001" value={newDivAmount} onChange={e => setNewDivAmount(Number(e.target.value))} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>Frequency</Label>
-                  <Select value={newFrequency} onValueChange={(v: any) => setNewFrequency(v)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="monthly">Monthly</SelectItem>
-                      <SelectItem value="semi-monthly">Semi-Monthly (2x / Month)</SelectItem>
-                      <SelectItem value="quarterly">Quarterly</SelectItem>
-                      <SelectItem value="annually">Annually</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="nextEx">Next Ex-Div Date</Label>
-                  <Input id="nextEx" type="date" value={newNextExDate} onChange={e => setNewNextExDate(e.target.value)} />
-                </div>
-              </div>
-            </div>
+            <PositionFormFields data={formData} onChange={setFormData} />
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button>
               <Button onClick={handleAdd}>Save Position</Button>
@@ -156,7 +155,15 @@ export default function Portfolio() {
                     <TableCell>${pos.dividendAmount.toFixed(3)}</TableCell>
                     <TableCell className="capitalize">{pos.frequency.replace('-', ' ')}</TableCell>
                     <TableCell>{pos.nextExDate}</TableCell>
-                    <TableCell className="text-right space-x-2">
+                    <TableCell className="text-right space-x-1">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-8 w-8 text-muted-foreground hover:text-primary"
+                        onClick={() => openEdit(pos)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
                       <Button 
                         variant="ghost" 
                         size="icon" 
@@ -180,6 +187,69 @@ export default function Portfolio() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={!!editingPos} onOpenChange={(open) => !open && setEditingPos(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Position: {editingPos?.ticker}</DialogTitle>
+            <DialogDescription>Update your holding or dividend information.</DialogDescription>
+          </DialogHeader>
+          <PositionFormFields data={formData} onChange={setFormData} />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingPos(null)}>Cancel</Button>
+            <Button onClick={handleUpdate}>Update Position</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function PositionFormFields({ data, onChange }: { data: any, onChange: (d: any) => void }) {
+  const update = (field: string, val: any) => onChange({ ...data, [field]: val });
+
+  return (
+    <div className="grid gap-4 py-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-2">
+          <Label htmlFor="ticker">Ticker Symbol</Label>
+          <Input id="ticker" placeholder="AAPL" value={data.ticker} onChange={e => update('ticker', e.target.value)} />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="shares">Shares Owned</Label>
+          <Input id="shares" type="number" value={data.shares} onChange={e => update('shares', Number(e.target.value))} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-2">
+          <Label htmlFor="price">Avg. Purchase Price</Label>
+          <Input id="price" type="number" step="0.01" value={data.purchasePrice} onChange={e => update('purchasePrice', Number(e.target.value))} />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="divAmount">Div. Amount (Per Share)</Label>
+          <Input id="divAmount" type="number" step="0.001" value={data.dividendAmount} onChange={e => update('dividendAmount', Number(e.target.value))} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-2">
+          <Label>Frequency</Label>
+          <Select value={data.frequency} onValueChange={(v: any) => update('frequency', v)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="monthly">Monthly</SelectItem>
+              <SelectItem value="semi-monthly">Semi-Monthly (2x / Month)</SelectItem>
+              <SelectItem value="quarterly">Quarterly</SelectItem>
+              <SelectItem value="annually">Annually</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="nextEx">Next Ex-Div Date</Label>
+          <Input id="nextEx" type="date" value={data.nextExDate} onChange={e => update('nextExDate', e.target.value)} />
+        </div>
+      </div>
     </div>
   );
 }
