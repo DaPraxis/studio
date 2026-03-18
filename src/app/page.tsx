@@ -1,10 +1,11 @@
+
 "use client"
 
 import { usePortfolio } from "@/hooks/use-portfolio";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DollarSign, PieChart, Calendar as CalendarIcon, ArrowUpRight } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { format, isAfter, isBefore, addDays } from "date-fns";
+import { format, isAfter } from "date-fns";
 
 export default function Dashboard() {
   const { positions, getAllDividends, isLoaded } = usePortfolio();
@@ -28,14 +29,17 @@ export default function Dashboard() {
   const upcomingDivs = allDivs.filter(d => isAfter(new Date(d.payoutDate), now));
   const totalUpcomingPayout = upcomingDivs.reduce((acc, d) => acc + d.totalAmount, 0);
   
-  const totalPortfolioCost = positions.reduce((acc, p) => acc + (p.shares * p.purchasePrice), 0);
+  const totalPortfolioCost = positions.reduce((acc, p) => acc + p.totalCost, 0);
   
-  // Simulated annual yield
+  // Calculate annual income based on the 12-month projections
   const annualIncome = allDivs.reduce((acc, d) => {
-    // Basic heuristic: check how many times this ticker paid in mock data
-    // Real app would sum last 12 months
+    // We sum all projected/base dividends in the generated list
     return acc + d.totalAmount;
   }, 0);
+
+  const yieldPercentage = totalPortfolioCost > 0 
+    ? ((annualIncome / totalPortfolioCost) * 100).toFixed(2) 
+    : "0.00";
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto w-full space-y-8">
@@ -76,7 +80,7 @@ export default function Dashboard() {
             <div className="text-2xl font-bold">${annualIncome.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
             <p className="text-xs text-accent mt-1 flex items-center gap-1">
               <ArrowUpRight className="h-3 w-3" />
-              {((annualIncome / totalPortfolioCost) * 100).toFixed(2)}% Avg. Yield
+              {yieldPercentage}% Avg. Yield
             </p>
           </CardContent>
         </Card>
@@ -138,7 +142,7 @@ export default function Dashboard() {
                     {format(new Date(allDivs[0].payoutDate), 'MMM dd')}
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Your next dividend payout from <strong>{allDivs[0].ticker}</strong> is arriving in a few weeks.
+                    Your next dividend payout from <strong>{allDivs[0].ticker}</strong> is arriving soon.
                   </p>
                 </div>
               ) : (
