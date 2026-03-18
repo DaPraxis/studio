@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { usePortfolio } from "@/hooks/use-portfolio";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -12,17 +12,19 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { TransactionType, DividendFrequency } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 export default function HistoryPage() {
-  const { transactions, manualAdjustments, deleteTransaction, addTransaction, importData, isLoaded } = usePortfolio();
+  const { transactions, manualAdjustments, positions, deleteTransaction, addTransaction, importData, isLoaded } = usePortfolio();
   const { toast } = useToast();
   const [isAddOpen, setIsAddOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importType, setImportType] = useState<'csv' | 'json'>('json');
+  const [updateDivInfo, setUpdateDivInfo] = useState(true);
 
   const [formData, setFormData] = useState({
     ticker: "",
@@ -36,8 +38,23 @@ export default function HistoryPage() {
     nextExDate: format(new Date(), 'yyyy-MM-dd')
   });
 
+  useEffect(() => {
+    const existing = positions.find(p => p.ticker === formData.ticker.toUpperCase());
+    if (existing) {
+      setUpdateDivInfo(false);
+      setFormData(prev => ({
+        ...prev,
+        dividendAmount: existing.dividendAmount,
+        frequency: existing.frequency,
+        nextExDate: existing.nextExDate
+      }));
+    } else {
+      setUpdateDivInfo(true);
+    }
+  }, [formData.ticker, positions]);
+
   const handleLogTransaction = () => {
-    if (!formData.ticker || formData.shares < 0) {
+    if (!formData.ticker || formData.shares <= 0) {
       toast({
         variant: "destructive",
         title: "Invalid Input",
@@ -55,13 +72,12 @@ export default function HistoryPage() {
       shares: Number(formData.shares),
       price: Number(formData.price),
       totalAmount: Number(finalTotal),
-      dividendAmount: (formData.type === 'buy' || formData.type === 'dividend') ? Number(formData.dividendAmount) : undefined,
-      frequency: formData.type === 'buy' ? formData.frequency : undefined,
-      nextExDate: (formData.type === 'buy' || formData.type === 'dividend') ? formData.nextExDate : undefined
+      dividendAmount: (formData.type === 'dividend' || (formData.type === 'buy' && updateDivInfo)) ? Number(formData.dividendAmount) : undefined,
+      frequency: (formData.type === 'buy' && updateDivInfo) ? formData.frequency : undefined,
+      nextExDate: (formData.type === 'dividend' || (formData.type === 'buy' && updateDivInfo)) ? formData.nextExDate : undefined
     });
     
     setIsAddOpen(false);
-    // Reset form
     setFormData({
       ticker: "",
       type: "buy",
@@ -114,7 +130,6 @@ export default function HistoryPage() {
           importData(data);
           toast({ title: "Import Successful", description: "Portfolio and adjustments restored." });
         } else {
-          // CSV logic
           const lines = text.split("\n");
           const headers = lines[0].split(",");
           lines.slice(1).forEach(line => {
@@ -138,7 +153,6 @@ export default function HistoryPage() {
       }
     };
     reader.readAsText(file);
-    // Reset file input
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -149,7 +163,7 @@ export default function HistoryPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-primary">Activity History</h1>
-          <p className="text-muted-foreground">Manage your transactions and backups. Data is saved locally in your browser.</p>
+          <p className="text-muted-foreground">Manage your transactions. Data is saved locally in your browser.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -205,7 +219,7 @@ export default function HistoryPage() {
             <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Log Transaction</DialogTitle>
-                <DialogDescription>A "Buy" will update or create a portfolio entry with the provided dividend info.</DialogDescription>
+                <DialogDescription>Add buys, sells, or actual dividend payouts to your history.</DialogDescription>
               </DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -278,16 +292,30 @@ export default function HistoryPage() {
 
                 {(formData.type === 'buy' || formData.type === 'dividend') && (
                   <div className="space-y-4 pt-4 border-t">
-                    <h4 className="font-semibold text-sm text-accent flex items-center gap-2">
-                      <Gift className="h-4 w-4" />
-                      Dividend Adjustment
-                    </h4>
-                    <div className="grid gap-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold text-sm text-accent flex items-center gap-2">
+                        <Gift className="h-4 w-4" />
+                        Dividend Details
+                      </h4>
+                      {formData.type === 'buy' && (
+                        <div className="flex items-center space-x-2">
+                          <Switch 
+                            id="update-div" 
+                            checked={updateDivInfo} 
+                            onCheckedChange={setUpdateDivInfo} 
+                          />
+                          <Label htmlFor="update-div" className="text-xs">Update Schedule?</Label>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className={cn("grid gap-4 transition-opacity", (!updateDivInfo && formData.type === 'buy') ? "opacity-40" : "opacity-100")}>
                       <div className="grid gap-2">
-                        <Label>Current Dividend Amount (Per Share)</Label>
+                        <Label>Dividend Amount (Per Share)</Label>
                         <Input 
                           type="number" 
                           step="0.001" 
+                          disabled={!updateDivInfo && formData.type === 'buy'}
                           value={formData.dividendAmount} 
                           onChange={e => setFormData(prev => ({ ...prev, dividendAmount: Number(e.target.value) }))} 
                         />
@@ -297,6 +325,7 @@ export default function HistoryPage() {
                           <div className="grid gap-2">
                             <Label>Frequency</Label>
                             <Select 
+                              disabled={!updateDivInfo}
                               value={formData.frequency} 
                               onValueChange={(v: DividendFrequency) => setFormData(prev => ({ ...prev, frequency: v }))}
                             >
@@ -315,6 +344,7 @@ export default function HistoryPage() {
                             <Label>Next Ex-Date</Label>
                             <Input 
                               type="date" 
+                              disabled={!updateDivInfo}
                               value={formData.nextExDate} 
                               onChange={e => setFormData(prev => ({ ...prev, nextExDate: e.target.value }))} 
                             />
@@ -327,7 +357,7 @@ export default function HistoryPage() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button>
-                <Button onClick={handleLogTransaction}>Save & Update Portfolio</Button>
+                <Button onClick={handleLogTransaction}>Save Transaction</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>

@@ -2,7 +2,7 @@
 
 import { usePortfolio } from "@/hooks/use-portfolio";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { DollarSign, PieChart, Calendar as CalendarIcon, ArrowUpRight } from "lucide-react";
+import { DollarSign, PieChart, Calendar as CalendarIcon, ArrowUpRight, TrendingUp } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format, isAfter } from "date-fns";
 
@@ -25,14 +25,11 @@ export default function Dashboard() {
   const allDivs = getAllDividends();
   const now = new Date();
   
-  // Future payouts based on payout date
   const upcomingDivs = allDivs.filter(d => isAfter(new Date(d.payoutDate), now));
   const totalUpcomingPayout = upcomingDivs.reduce((acc, d) => acc + (Number(d.totalAmount) || 0), 0);
   
-  // Total principle currently deployed
   const totalPortfolioCost = positions.reduce((acc, p) => acc + (Number(p.totalCost) || 0), 0);
   
-  // Annualized dividend income from projected window (approx 1 year)
   const annualIncome = allDivs.reduce((acc, d) => {
     return acc + (Number(d.totalAmount) || 0);
   }, 0);
@@ -74,7 +71,7 @@ export default function Dashboard() {
         <Card className="bg-white shadow-sm border-none">
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
             <CardTitle className="text-sm font-medium">Estimated Annual Income</CardTitle>
-            <TrendingUpIcon className="h-4 w-4 text-accent" />
+            <TrendingUp className="h-4 w-4 text-accent" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">${Number(annualIncome || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
@@ -154,31 +151,11 @@ export default function Dashboard() {
           <div className="p-6 rounded-xl bg-primary text-white space-y-3">
             <h3 className="font-bold">Pro Tip</h3>
             <p className="text-sm text-primary-foreground/80 leading-relaxed">
-              Export your data as a JSON file periodically from the History page to keep a permanent backup of your portfolio and calendar tweaks.
+              Log transactions in the History tab. If you buy more of an existing stock, we'll keep your schedule intact unless you choose to update it!
             </p>
           </div>
         </div>
       </div>
     </div>
   );
-}
-
-function TrendingUpIcon(props: any) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
-      <polyline points="16 7 22 7 22 13" />
-    </svg>
-  )
 }
