@@ -11,27 +11,37 @@ export function usePortfolio() {
   const [manualAdjustments, setManualAdjustments] = useState<Record<string, Record<number, { date?: string; amount?: number }>>>({});
   const [isLoaded, setIsLoaded] = useState(false);
 
+  // Load from Local Storage on mount
   useEffect(() => {
-    const savedTransactions = localStorage.getItem('dw_transactions_v10');
-    const savedAdjustments = localStorage.getItem('dw_adjustments_v10');
+    const savedTransactions = localStorage.getItem('dw_transactions_v11');
+    const savedAdjustments = localStorage.getItem('dw_adjustments_v11');
     
     if (savedTransactions) {
-      setTransactions(JSON.parse(savedTransactions));
+      try {
+        setTransactions(JSON.parse(savedTransactions));
+      } catch (e) {
+        setTransactions(INITIAL_TRANSACTIONS);
+      }
     } else {
       setTransactions(INITIAL_TRANSACTIONS);
     }
 
     if (savedAdjustments) {
-      setManualAdjustments(JSON.parse(savedAdjustments));
+      try {
+        setManualAdjustments(JSON.parse(savedAdjustments));
+      } catch (e) {
+        setManualAdjustments({});
+      }
     }
 
     setIsLoaded(true);
   }, []);
 
+  // Persist to Local Storage whenever data changes
   useEffect(() => {
     if (isLoaded) {
-      localStorage.setItem('dw_transactions_v10', JSON.stringify(transactions));
-      localStorage.setItem('dw_adjustments_v10', JSON.stringify(manualAdjustments));
+      localStorage.setItem('dw_transactions_v11', JSON.stringify(transactions));
+      localStorage.setItem('dw_adjustments_v11', JSON.stringify(manualAdjustments));
     }
   }, [transactions, manualAdjustments, isLoaded]);
 
@@ -48,7 +58,9 @@ export function usePortfolio() {
     const sortedTx = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     sortedTx.forEach(tx => {
-      const ticker = tx.ticker.toUpperCase();
+      const ticker = (tx.ticker || "").toUpperCase();
+      if (!ticker) return;
+
       if (!posMap[ticker]) {
         posMap[ticker] = { 
           shares: 0, 
@@ -61,18 +73,19 @@ export function usePortfolio() {
       }
 
       const p = posMap[ticker];
+      const txShares = Number(tx.shares) || 0;
+      const txAmount = Number(tx.totalAmount) || 0;
 
       if (tx.type === 'buy') {
-        p.shares += (Number(tx.shares) || 0);
-        p.totalCost += (Number(tx.totalAmount) || 0);
+        p.shares += txShares;
+        p.totalCost += txAmount;
         if (tx.dividendAmount !== undefined) p.dividendAmount = Number(tx.dividendAmount) || 0;
         if (tx.frequency !== undefined) p.frequency = tx.frequency;
         if (tx.nextExDate !== undefined) p.nextExDate = tx.nextExDate;
       } else if (tx.type === 'sell') {
         const avgCost = p.shares > 0 ? p.totalCost / p.shares : 0;
-        const sellShares = (Number(tx.shares) || 0);
-        p.shares -= sellShares;
-        p.totalCost -= (sellShares * avgCost);
+        p.shares -= txShares;
+        p.totalCost -= (txShares * avgCost);
       } else if (tx.type === 'dividend') {
         if (tx.dividendAmount !== undefined) p.dividendAmount = Number(tx.dividendAmount) || 0;
       }
@@ -94,8 +107,7 @@ export function usePortfolio() {
   }, [transactions, manualAdjustments]);
 
   const addTransaction = useCallback((tx: Omit<TransactionRecord, 'id'>) => {
-    // Improved unique ID generation for batch operations
-    const uniqueId = `t_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const uniqueId = `t_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const transaction: TransactionRecord = {
       ...tx,
       id: uniqueId,
@@ -106,6 +118,7 @@ export function usePortfolio() {
       dividendAmount: tx.dividendAmount !== undefined ? Number(tx.dividendAmount) || 0 : undefined
     };
     
+    // Reset adjustments if it's a new buy to start fresh projections
     if (tx.type === 'buy') {
       setManualAdjustments(prev => {
         const next = { ...prev };
@@ -135,9 +148,15 @@ export function usePortfolio() {
     });
   }, []);
 
+  const importData = useCallback((data: { transactions: TransactionRecord[], manualAdjustments: any }) => {
+    if (data.transactions) setTransactions(data.transactions);
+    if (data.manualAdjustments) setManualAdjustments(data.manualAdjustments);
+  }, []);
+
   const getAllDividends = useCallback(() => {
     const allDivs: DividendData[] = [];
     
+    // Include past dividend payouts from history
     transactions.forEach(tx => {
       if (tx.type === 'dividend') {
         const exDateStr = tx.nextExDate || tx.date;
@@ -155,6 +174,7 @@ export function usePortfolio() {
       }
     });
 
+    // Project future dividends
     positions.forEach(pos => {
       const baseDate = parseISO(pos.nextExDate);
       const baseAmount = pos.dividendAmount;
@@ -211,11 +231,13 @@ export function usePortfolio() {
         const payoutDate = addDays(exDate, 10);
         const exDateStr = format(exDate, 'yyyy-MM-dd');
 
+        // QUALIFICATION LOGIC: Shares must exist BEFORE the ex-dividend date
         const sharesAtDate = transactions
           .filter(tx => tx.ticker === pos.ticker && isBefore(parseISO(tx.date), startOfDay(parseISO(exDateStr))))
           .reduce((sum, tx) => {
-            if (tx.type === 'buy') return sum + (Number(tx.shares) || 0);
-            if (tx.type === 'sell') return sum - (Number(tx.shares) || 0);
+            const txS = Number(tx.shares) || 0;
+            if (tx.type === 'buy') return sum + txS;
+            if (tx.type === 'sell') return sum - txS;
             return sum;
           }, 0);
 
@@ -226,7 +248,7 @@ export function usePortfolio() {
             recordDate: exDateStr,
             payoutDate: format(payoutDate, 'yyyy-MM-dd'),
             amountPerShare: amountPerShare,
-            totalAmount: sharesAtDate * amountPerShare,
+            totalAmount: Number((sharesAtDate * amountPerShare).toFixed(2)),
             sharesAtTime: sharesAtDate,
             index: i,
             status: status
@@ -249,10 +271,12 @@ export function usePortfolio() {
   return {
     positions,
     transactions,
+    manualAdjustments,
     addTransaction,
     deleteTransaction,
     updateManualAdjustment,
     getAllDividends,
+    importData,
     isLoaded
   };
 }

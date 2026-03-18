@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useRef } from 'react';
@@ -6,21 +7,24 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { format } from 'date-fns';
-import { History, ArrowUpRight, ArrowDownRight, Gift, Trash2, Plus, Download, Upload } from "lucide-react";
+import { History, ArrowUpRight, ArrowDownRight, Gift, Trash2, Plus, Download, Upload, FileJson, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { TransactionType, DividendFrequency, TransactionRecord } from '@/lib/types';
+import { TransactionType, DividendFrequency } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 export default function HistoryPage() {
-  const { transactions, deleteTransaction, addTransaction, isLoaded } = usePortfolio();
+  const { transactions, manualAdjustments, deleteTransaction, addTransaction, importData, isLoaded } = usePortfolio();
   const { toast } = useToast();
   const [isAddOpen, setIsAddOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importType, setImportType] = useState<'csv' | 'json'>('json');
+
   const [formData, setFormData] = useState({
     ticker: "",
     type: "buy" as TransactionType,
@@ -71,44 +75,33 @@ export default function HistoryPage() {
     });
   };
 
-  const exportToCSV = () => {
-    if (transactions.length === 0) {
-      toast({
-        variant: "destructive",
-        title: "No Data",
-        description: "There are no transactions to export."
-      });
-      return;
-    }
-
-    const headers = ["ticker", "type", "date", "shares", "price", "totalAmount", "dividendAmount", "frequency", "nextExDate"];
-    const csvContent = [
-      headers.join(","),
-      ...transactions.map(t => [
-        t.ticker,
-        t.type,
-        t.date,
-        t.shares,
-        t.price,
-        t.totalAmount,
-        t.dividendAmount ?? "",
-        t.frequency ?? "",
-        t.nextExDate ?? ""
-      ].join(","))
-    ].join("\n");
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const exportToJSON = () => {
+    const data = { transactions, manualAdjustments };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `dividendwise_history_${format(new Date(), 'yyyyMMdd')}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
+    link.href = url;
+    link.download = `dividendwise_backup_${format(new Date(), 'yyyyMMdd')}.json`;
     link.click();
-    document.body.removeChild(link);
+    toast({ title: "Exported JSON", description: "Database backup saved to your local machine." });
   };
 
-  const handleImportCSV = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const exportToCSV = () => {
+    if (transactions.length === 0) return;
+    const headers = ["ticker", "type", "date", "shares", "price", "totalAmount"];
+    const csvContent = [
+      headers.join(","),
+      ...transactions.map(t => [t.ticker, t.type, t.date, t.shares, t.price, t.totalAmount].join(","))
+    ].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `history_${format(new Date(), 'yyyyMMdd')}.csv`;
+    link.click();
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -116,44 +109,32 @@ export default function HistoryPage() {
     reader.onload = (e) => {
       try {
         const text = e.target?.result as string;
-        const lines = text.split("\n");
-        const headers = lines[0].split(",");
-        
-        let importCount = 0;
-        for (let i = 1; i < lines.length; i++) {
-          if (!lines[i].trim()) continue;
-          
-          const values = lines[i].split(",");
-          const record: any = {};
-          headers.forEach((header, index) => {
-            record[header.trim()] = values[index]?.trim();
+        if (importType === 'json') {
+          const data = JSON.parse(text);
+          importData(data);
+          toast({ title: "Import Successful", description: "Portfolio and adjustments restored." });
+        } else {
+          // CSV logic
+          const lines = text.split("\n");
+          const headers = lines[0].split(",");
+          lines.slice(1).forEach(line => {
+            if (!line.trim()) return;
+            const vals = line.split(",");
+            const rec: any = {};
+            headers.forEach((h, i) => rec[h.trim()] = vals[i]?.trim());
+            addTransaction({
+              ticker: rec.ticker,
+              type: rec.type as TransactionType,
+              date: rec.date,
+              shares: Number(rec.shares),
+              price: Number(rec.price),
+              totalAmount: Number(rec.totalAmount)
+            });
           });
-
-          addTransaction({
-            ticker: record.ticker,
-            type: record.type as TransactionType,
-            date: record.date,
-            shares: Number(record.shares),
-            price: Number(record.price),
-            totalAmount: Number(record.totalAmount),
-            dividendAmount: record.dividendAmount ? Number(record.dividendAmount) : undefined,
-            frequency: record.frequency ? record.frequency as DividendFrequency : undefined,
-            nextExDate: record.nextExDate || undefined
-          });
-          importCount++;
+          toast({ title: "Import Successful", description: "Transactions added to log." });
         }
-        
-        toast({
-          title: "Import Successful",
-          description: `Imported ${importCount} transactions.`
-        });
       } catch (err) {
-        console.error(err);
-        toast({
-          variant: "destructive",
-          title: "Import Failed",
-          description: "Check your CSV format and try again."
-        });
+        toast({ variant: "destructive", title: "Import Failed", description: "Check file format." });
       }
     };
     reader.readAsText(file);
@@ -167,25 +148,52 @@ export default function HistoryPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-primary">Activity History</h1>
-          <p className="text-muted-foreground">Log transactions to automatically update your portfolio and projections.</p>
+          <p className="text-muted-foreground">Manage your transactions and backups. Data is saved locally in your browser.</p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <input 
             type="file" 
-            accept=".csv" 
+            accept={importType === 'json' ? ".json" : ".csv"} 
             className="hidden" 
             ref={fileInputRef} 
-            onChange={handleImportCSV} 
+            onChange={handleFileUpload} 
           />
-          <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
-            <Upload className="h-4 w-4 mr-2" />
-            Import CSV
-          </Button>
-          <Button variant="outline" onClick={exportToCSV}>
-            <Download className="h-4 w-4 mr-2" />
-            Export CSV
-          </Button>
+          
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <Upload className="h-4 w-4 mr-2" />
+                Import Data
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => { setImportType('json'); setTimeout(() => fileInputRef.current?.click(), 100); }}>
+                <FileJson className="h-4 w-4 mr-2" /> JSON Backup
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { setImportType('csv'); setTimeout(() => fileInputRef.current?.click(), 100); }}>
+                <FileSpreadsheet className="h-4 w-4 mr-2" /> CSV Table
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <Download className="h-4 w-4 mr-2" />
+                Export Data
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={exportToJSON}>
+                <FileJson className="h-4 w-4 mr-2" /> JSON (Full Backup)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={exportToCSV}>
+                <FileSpreadsheet className="h-4 w-4 mr-2" /> CSV (Basic Table)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger asChild>
               <Button className="bg-primary hover:bg-primary/90">
@@ -366,7 +374,7 @@ export default function HistoryPage() {
                     "text-right font-bold",
                     t.type === 'sell' ? "text-green-600" : (t.type === 'dividend' ? "text-accent" : "text-primary")
                   )}>
-                    {t.type === 'dividend' || t.type === 'sell' ? `+` : `-`}${t.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {t.type === 'dividend' || t.type === 'sell' ? `+` : `-`}${Number(t.totalAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button 

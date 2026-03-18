@@ -32,6 +32,8 @@ export default function Dashboard() {
   const totalPortfolioCost = positions.reduce((acc, p) => acc + (Number(p.totalCost) || 0), 0);
   
   const annualIncome = allDivs.reduce((acc, d) => {
+    // Only include projected/future or recent annual cycle divs, 
+    // but the simple sum of the 12-month projection window works best here
     return acc + (Number(d.totalAmount) || 0);
   }, 0);
 
@@ -43,7 +45,7 @@ export default function Dashboard() {
     <div className="p-4 md:p-8 max-w-7xl mx-auto w-full space-y-8">
       <div>
         <h1 className="text-3xl font-bold text-primary">Dashboard</h1>
-        <p className="text-muted-foreground mt-1">Welcome back. Here is your portfolio at a glance.</p>
+        <p className="text-muted-foreground mt-1">Welcome back. Your portfolio is stored safely in your browser.</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -53,7 +55,7 @@ export default function Dashboard() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${totalPortfolioCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            <div className="text-2xl font-bold">${Number(totalPortfolioCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
             <p className="text-xs text-muted-foreground mt-1">Across {positions.length} holdings</p>
           </CardContent>
         </Card>
@@ -64,7 +66,7 @@ export default function Dashboard() {
             <CalendarIcon className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${totalUpcomingPayout.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            <div className="text-2xl font-bold">${Number(totalUpcomingPayout || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
             <p className="text-xs text-muted-foreground mt-1">{upcomingDivs.length} projected payouts</p>
           </CardContent>
         </Card>
@@ -75,7 +77,7 @@ export default function Dashboard() {
             <TrendingUpIcon className="h-4 w-4 text-accent" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${annualIncome.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            <div className="text-2xl font-bold">${Number(annualIncome || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
             <p className="text-xs text-accent mt-1 flex items-center gap-1">
               <ArrowUpRight className="h-3 w-3" />
               {yieldPercentage}% Avg. Yield
@@ -114,7 +116,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="font-bold text-primary">+${div.totalAmount.toFixed(2)}</div>
+                    <div className="font-bold text-primary">+${Number(div.totalAmount || 0).toFixed(2)}</div>
                     <div className="text-xs text-muted-foreground">{div.sharesAtTime} shares</div>
                   </div>
                 </div>
@@ -152,7 +154,7 @@ export default function Dashboard() {
           <div className="p-6 rounded-xl bg-primary text-white space-y-3">
             <h3 className="font-bold">Pro Tip</h3>
             <p className="text-sm text-primary-foreground/80 leading-relaxed">
-              Diversify your ex-dividend dates across the month to ensure a more consistent cash flow every week.
+              Export your data as a JSON file periodically from the History page to keep a permanent backup of your portfolio and calendar tweaks.
             </p>
           </div>
         </div>
