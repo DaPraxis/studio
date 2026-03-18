@@ -1,23 +1,26 @@
 "use client"
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { usePortfolio } from "@/hooks/use-portfolio";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { format } from 'date-fns';
-import { History, ArrowUpRight, ArrowDownRight, Gift, Trash2, Plus } from "lucide-react";
+import { History, ArrowUpRight, ArrowDownRight, Gift, Trash2, Plus, Download, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { TransactionType, DividendFrequency } from '@/lib/types';
+import { TransactionType, DividendFrequency, TransactionRecord } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 
 export default function HistoryPage() {
   const { transactions, deleteTransaction, addTransaction, isLoaded } = usePortfolio();
+  const { toast } = useToast();
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     ticker: "",
     type: "buy" as TransactionType,
@@ -31,7 +34,14 @@ export default function HistoryPage() {
   });
 
   const handleLogTransaction = () => {
-    if (!formData.ticker || formData.shares < 0) return;
+    if (!formData.ticker || formData.shares < 0) {
+      toast({
+        variant: "destructive",
+        title: "Invalid Input",
+        description: "Please provide a ticker and a valid number of shares."
+      });
+      return;
+    }
     
     const finalTotal = formData.totalAmount || (formData.shares * formData.price);
     
@@ -61,152 +71,258 @@ export default function HistoryPage() {
     });
   };
 
+  const exportToCSV = () => {
+    if (transactions.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "No Data",
+        description: "There are no transactions to export."
+      });
+      return;
+    }
+
+    const headers = ["ticker", "type", "date", "shares", "price", "totalAmount", "dividendAmount", "frequency", "nextExDate"];
+    const csvContent = [
+      headers.join(","),
+      ...transactions.map(t => [
+        t.ticker,
+        t.type,
+        t.date,
+        t.shares,
+        t.price,
+        t.totalAmount,
+        t.dividendAmount ?? "",
+        t.frequency ?? "",
+        t.nextExDate ?? ""
+      ].join(","))
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `dividendwise_history_${format(new Date(), 'yyyyMMdd')}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleImportCSV = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        const lines = text.split("\n");
+        const headers = lines[0].split(",");
+        
+        let importCount = 0;
+        for (let i = 1; i < lines.length; i++) {
+          if (!lines[i].trim()) continue;
+          
+          const values = lines[i].split(",");
+          const record: any = {};
+          headers.forEach((header, index) => {
+            record[header.trim()] = values[index]?.trim();
+          });
+
+          addTransaction({
+            ticker: record.ticker,
+            type: record.type as TransactionType,
+            date: record.date,
+            shares: Number(record.shares),
+            price: Number(record.price),
+            totalAmount: Number(record.totalAmount),
+            dividendAmount: record.dividendAmount ? Number(record.dividendAmount) : undefined,
+            frequency: record.frequency ? record.frequency as DividendFrequency : undefined,
+            nextExDate: record.nextExDate || undefined
+          });
+          importCount++;
+        }
+        
+        toast({
+          title: "Import Successful",
+          description: `Imported ${importCount} transactions.`
+        });
+      } catch (err) {
+        console.error(err);
+        toast({
+          variant: "destructive",
+          title: "Import Failed",
+          description: "Check your CSV format and try again."
+        });
+      }
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   if (!isLoaded) return <div className="p-8 text-center">Loading...</div>;
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto w-full space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-primary">Activity History</h1>
           <p className="text-muted-foreground">Log transactions to automatically update your portfolio and projections.</p>
         </div>
 
-        <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-primary hover:bg-primary/90">
-              <Plus className="h-4 w-4 mr-2" />
-              Log Transaction
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Log Transaction</DialogTitle>
-              <DialogDescription>A "Buy" will update or create a portfolio entry with the provided dividend info.</DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>Ticker</Label>
-                  <Input 
-                    placeholder="AAPL" 
-                    value={formData.ticker} 
-                    onChange={e => setFormData(prev => ({ ...prev, ticker: e.target.value }))} 
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Type</Label>
-                  <Select 
-                    value={formData.type} 
-                    onValueChange={(v: TransactionType) => setFormData(prev => ({ ...prev, type: v }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="buy">Buy</SelectItem>
-                      <SelectItem value="sell">Sell</SelectItem>
-                      <SelectItem value="dividend">Dividend Payout</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>Transaction Date</Label>
-                  <Input 
-                    type="date" 
-                    value={formData.date} 
-                    onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))} 
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Shares</Label>
-                  <Input 
-                    type="number" 
-                    value={formData.shares} 
-                    onChange={e => setFormData(prev => ({ ...prev, shares: Number(e.target.value) }))} 
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>{formData.type === 'dividend' ? 'Amount / Share' : 'Price / Share'}</Label>
-                  <Input 
-                    type="number" 
-                    step="0.001" 
-                    value={formData.price} 
-                    onChange={e => setFormData(prev => ({ ...prev, price: Number(e.target.value) }))} 
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Total Value</Label>
-                  <Input 
-                    type="number" 
-                    step="0.01" 
-                    placeholder={(formData.shares * formData.price).toFixed(2)}
-                    value={formData.totalAmount || ""} 
-                    onChange={e => setFormData(prev => ({ ...prev, totalAmount: Number(e.target.value) }))} 
-                  />
-                </div>
-              </div>
-
-              {(formData.type === 'buy' || formData.type === 'dividend') && (
-                <div className="space-y-4 pt-4 border-t">
-                  <h4 className="font-semibold text-sm text-accent flex items-center gap-2">
-                    <Gift className="h-4 w-4" />
-                    Dividend Adjustment
-                  </h4>
-                  <div className="grid gap-4">
-                    <div className="grid gap-2">
-                      <Label>Current Dividend Amount (Per Share)</Label>
-                      <Input 
-                        type="number" 
-                        step="0.001" 
-                        value={formData.dividendAmount} 
-                        onChange={e => setFormData(prev => ({ ...prev, dividendAmount: Number(e.target.value) }))} 
-                      />
-                    </div>
-                    {formData.type === 'buy' && (
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="grid gap-2">
-                          <Label>Frequency</Label>
-                          <Select 
-                            value={formData.frequency} 
-                            onValueChange={(v: DividendFrequency) => setFormData(prev => ({ ...prev, frequency: v }))}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="monthly">Monthly</SelectItem>
-                              <SelectItem value="semi-monthly">Semi-Monthly</SelectItem>
-                              <SelectItem value="quarterly">Quarterly</SelectItem>
-                              <SelectItem value="annually">Annually</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="grid gap-2">
-                          <Label>Next Ex-Date</Label>
-                          <Input 
-                            type="date" 
-                            value={formData.nextExDate} 
-                            onChange={e => setFormData(prev => ({ ...prev, nextExDate: e.target.value }))} 
-                          />
-                        </div>
-                      </div>
-                    )}
+        <div className="flex items-center gap-2">
+          <input 
+            type="file" 
+            accept=".csv" 
+            className="hidden" 
+            ref={fileInputRef} 
+            onChange={handleImportCSV} 
+          />
+          <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+            <Upload className="h-4 w-4 mr-2" />
+            Import CSV
+          </Button>
+          <Button variant="outline" onClick={exportToCSV}>
+            <Download className="h-4 w-4 mr-2" />
+            Export CSV
+          </Button>
+          <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+            <DialogTrigger asChild>
+              <Button className="bg-primary hover:bg-primary/90">
+                <Plus className="h-4 w-4 mr-2" />
+                Log Transaction
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Log Transaction</DialogTitle>
+                <DialogDescription>A "Buy" will update or create a portfolio entry with the provided dividend info.</DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label>Ticker</Label>
+                    <Input 
+                      placeholder="AAPL" 
+                      value={formData.ticker} 
+                      onChange={e => setFormData(prev => ({ ...prev, ticker: e.target.value }))} 
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Type</Label>
+                    <Select 
+                      value={formData.type} 
+                      onValueChange={(v: TransactionType) => setFormData(prev => ({ ...prev, type: v }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="buy">Buy</SelectItem>
+                        <SelectItem value="sell">Sell</SelectItem>
+                        <SelectItem value="dividend">Dividend Payout</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
-              )}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button>
-              <Button onClick={handleLogTransaction}>Save & Update Portfolio</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label>Transaction Date</Label>
+                    <Input 
+                      type="date" 
+                      value={formData.date} 
+                      onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))} 
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Shares</Label>
+                    <Input 
+                      type="number" 
+                      value={formData.shares} 
+                      onChange={e => setFormData(prev => ({ ...prev, shares: Number(e.target.value) }))} 
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label>{formData.type === 'dividend' ? 'Amount / Share' : 'Price / Share'}</Label>
+                    <Input 
+                      type="number" 
+                      step="0.001" 
+                      value={formData.price} 
+                      onChange={e => setFormData(prev => ({ ...prev, price: Number(e.target.value) }))} 
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Total Value</Label>
+                    <Input 
+                      type="number" 
+                      step="0.01" 
+                      placeholder={(formData.shares * formData.price).toFixed(2)}
+                      value={formData.totalAmount || ""} 
+                      onChange={e => setFormData(prev => ({ ...prev, totalAmount: Number(e.target.value) }))} 
+                    />
+                  </div>
+                </div>
+
+                {(formData.type === 'buy' || formData.type === 'dividend') && (
+                  <div className="space-y-4 pt-4 border-t">
+                    <h4 className="font-semibold text-sm text-accent flex items-center gap-2">
+                      <Gift className="h-4 w-4" />
+                      Dividend Adjustment
+                    </h4>
+                    <div className="grid gap-4">
+                      <div className="grid gap-2">
+                        <Label>Current Dividend Amount (Per Share)</Label>
+                        <Input 
+                          type="number" 
+                          step="0.001" 
+                          value={formData.dividendAmount} 
+                          onChange={e => setFormData(prev => ({ ...prev, dividendAmount: Number(e.target.value) }))} 
+                        />
+                      </div>
+                      {formData.type === 'buy' && (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="grid gap-2">
+                            <Label>Frequency</Label>
+                            <Select 
+                              value={formData.frequency} 
+                              onValueChange={(v: DividendFrequency) => setFormData(prev => ({ ...prev, frequency: v }))}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="monthly">Monthly</SelectItem>
+                                <SelectItem value="semi-monthly">Semi-Monthly</SelectItem>
+                                <SelectItem value="quarterly">Quarterly</SelectItem>
+                                <SelectItem value="annually">Annually</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="grid gap-2">
+                            <Label>Next Ex-Date</Label>
+                            <Input 
+                              type="date" 
+                              value={formData.nextExDate} 
+                              onChange={e => setFormData(prev => ({ ...prev, nextExDate: e.target.value }))} 
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button>
+                <Button onClick={handleLogTransaction}>Save & Update Portfolio</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       <Card className="border-none shadow-sm bg-white overflow-hidden">
